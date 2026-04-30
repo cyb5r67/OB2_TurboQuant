@@ -26,6 +26,13 @@ export interface ChatOpts {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
+  /**
+   * Ollama-only override: pick a different model than `runtime.ollama.model`
+   * for this single call. Used by the classifier to honor the `classifier_model`
+   * config knob. Llamacpp ignores it (llama-server has exactly one model loaded
+   * at any time; switching is a manager operation, not a per-request option).
+   */
+  model?: string;
 }
 
 /** Normalized streaming chunk. Both providers parse their wire format into this. */

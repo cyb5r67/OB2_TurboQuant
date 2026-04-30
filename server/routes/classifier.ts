@@ -14,7 +14,7 @@
 import type { Config } from "../config.ts";
 import type { Sidecar } from "../sidecar.ts";
 import { getRuntime } from "../runtime_config.ts";
-import { getClassifierProvider } from "../llm/provider.ts";
+import { getClassifierProvider, type ChatOpts } from "../llm/provider.ts";
 
 interface SidecarDomainListResult {
   domains: string[];
@@ -91,9 +91,18 @@ User question: "${query}"`;
   try {
     let text: string;
     try {
-      const r = await getClassifierProvider().chatNonStream(
+      const provider = getClassifierProvider();
+      const opts: ChatOpts = { temperature: 0, max_tokens: 60 };
+      if (provider.id === "ollama") {
+        // Honor the legacy `classifier_model` knob — operators set this to a
+        // smaller/faster model (e.g. qwen2.5:0.5b) than the chat model so
+        // classification doesn't burn full-chat-model VRAM/time. Llamacpp
+        // can't honor it (one model loaded at a time).
+        opts.model = rt.ollama.classifier_model || rt.ollama.model;
+      }
+      const r = await provider.chatNonStream(
         [{ role: "user", content: classifierPrompt }],
-        { temperature: 0, max_tokens: 60 },
+        opts,
       );
       text = r.content.trim();
     } catch {

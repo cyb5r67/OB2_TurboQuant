@@ -156,6 +156,27 @@ initRuntime(tmp);
   restoreFetch();
 }
 
+// Case 5: opts.model overrides runtime config — used by the classifier to honor classifier_model
+{
+  mockFetch((url, init) => {
+    if (String(url).endsWith("/api/chat")) {
+      const body = JSON.parse(init?.body as string);
+      assert(body.model === "qwen2.5:0.5b", `opts.model overrides runtime model (got: ${body.model})`);
+      return new Response(JSON.stringify({
+        message: { content: "" },
+        prompt_eval_count: 0,
+        eval_count: 0,
+      }), { status: 200 });
+    }
+    throw new Error("unexpected url " + url);
+  });
+  await ollamaProvider.chatNonStream(
+    [{ role: "user", content: "x" }],
+    { temperature: 0, max_tokens: 5, model: "qwen2.5:0.5b" },
+  );
+  restoreFetch();
+}
+
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
 console.log("\nAll ollama_provider tests passed.");

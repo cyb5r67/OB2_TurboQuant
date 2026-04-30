@@ -42,7 +42,7 @@ function model(): string {
 
 function bodyFor(messages: ChatMessage[], opts: ChatOpts, stream: boolean) {
   return {
-    model: model(),
+    model: opts.model ?? model(),
     messages,
     stream,
     keep_alive: Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h",
