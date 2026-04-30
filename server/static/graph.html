@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OB2 Graph Explorer</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #38bdf8; --green: #4ade80; --red: #f87171; --yellow: #fbbf24;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+         background: var(--bg); color: var(--text); overflow: hidden; }
+  #toolbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 48px;
+    background: var(--card); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.6rem; padding: 0 1rem;
+    z-index: 10; overflow-x: auto;
+  }
+  #toolbar a.back { color: var(--muted); text-decoration: none; font-size: 0.85rem;
+                    white-space: nowrap; margin-right: 0.25rem; }
+  #toolbar a.back:hover { color: var(--text); }
+  #domain-select { background: var(--bg); border: 1px solid var(--border); color: var(--text);
+                   padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.82rem; min-width: 160px; }
+  #type-filters { display: flex; gap: 0.4rem; align-items: center; flex-shrink: 0; }
+  #type-filters label { font-size: 0.78rem; display: flex; align-items: center; gap: 0.2rem;
+                         cursor: pointer; white-space: nowrap; }
+  #search-box { background: var(--bg); border: 1px solid var(--border); color: var(--text);
+                padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.82rem; width: 160px; }
+  #layout-btn { background: var(--accent); color: var(--bg); border: none; padding: 0.3rem 0.7rem;
+                border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.78rem;
+                white-space: nowrap; }
+  #layout-btn:hover { opacity: 0.9; }
+  #layout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #export-gexf-btn { background: var(--border); color: var(--text); border: none;
+                     padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer;
+                     font-weight: 600; font-size: 0.78rem; white-space: nowrap;
+                     text-decoration: none; display: inline-block; }
+  #export-gexf-btn:hover { opacity: 0.85; }
+  #status-text { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+  #graph-canvas {
+    position: fixed; top: 48px; left: 0; right: 340px; bottom: 0;
+    background: #0a0e16;
+  }
+  #side-panel {
+    position: fixed; top: 48px; right: 0; width: 340px; bottom: 0;
+    overflow-y: auto; border-left: 1px solid var(--border);
+    padding: 0.75rem; font-size: 0.85rem; background: var(--bg);
+  }
+  #legend { margin-top: 0.5rem; font-size: 0.75rem; color: var(--muted); line-height: 1.8; }
+  #legend span { display: inline-flex; align-items: center; gap: 0.25rem; margin-right: 0.6rem; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <a href="/dashboard" class="back">← Dashboard</a>
+  <select id="domain-select"></select>
+  <span id="type-filters"></span>
+  <input id="search-box" type="search" placeholder="Search entities…" autocomplete="off">
+  <button id="layout-btn">Run Layout</button>
+  <a id="export-gexf-btn" href="#" download>Export GEXF ↓</a>
+  <span id="status-text">Loading…</span>
+</div>
+
+<div id="graph-canvas"></div>
+
+<div id="side-panel">
+  <div id="panel-content" style="color:var(--muted)">Click a node to see details.</div>
+  <div id="legend"></div>
+</div>
+
+<script src="/vendor/cytoscape.min.js"></script>
+<script src="/graph.js"></script>
+</body>
+</html>

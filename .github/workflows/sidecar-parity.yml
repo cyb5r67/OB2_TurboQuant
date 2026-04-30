@@ -1,0 +1,152 @@
+name: sidecar-parity
+
+# Parity harness: both sidecar runtimes must return byte-identical
+# JSON-RPC responses for every fixture in tests/sidecar-golden/fixtures/.
+#
+# - Python job: spawns retrieval/sidecar.py, runs all fixtures against sqlite.
+# - Rust job:   spawns sidecar-rs/target/release/ob2-sidecar, same fixtures.
+#
+# Both jobs use CPU-only embeddings — the ORT CUDA feature is off on CI
+# (runners are GPU-less). CUDA parity is covered separately by the local
+# benchmark in tests/sidecar-golden/benchmark.py.
+
+on:
+  pull_request:
+    paths:
+      - 'retrieval/**'
+      - 'context-engine/**'
+      - 'sidecar-rs/**'
+      - 'tests/sidecar-golden/**'
+      - '.github/workflows/sidecar-parity.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'retrieval/**'
+      - 'context-engine/**'
+      - 'sidecar-rs/**'
+      - 'tests/sidecar-golden/**'
+      - '.github/workflows/sidecar-parity.yml'
+
+jobs:
+  python-golden:
+    name: Python sidecar golden
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # sentence-transformers + torch together are ~2 GB; cache the
+      # HuggingFace model so we don't re-download MiniLM every run.
+      - name: Cache HuggingFace hub
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-${{ runner.os }}
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          # Pinned to the same versions the sidecar runs against locally.
+          # --extra-index-url adds PyTorch's wheel index alongside PyPI so
+          # torch resolves to the CPU-only build (smaller + faster in CI)
+          # while everything else still comes from PyPI.
+          pip install \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            pytest \
+            numpy \
+            pyyaml \
+            sqlite-vec \
+            "sentence-transformers>=2.2" \
+            "torch>=2.0"
+
+      - name: Run golden fixtures (Python, sqlite)
+        env:
+          # Vendored sibling package — sidecar.py prepends this to sys.path
+          # so `from context_engineering import ...` resolves.
+          OB2_CONTEXT_ENGINE_PATH: ${{ github.workspace }}/context-engine
+          # Deterministic CPU inference for byte-identical fixtures.
+          OB2_EMBEDDING_MODEL: all-MiniLM-L6-v2
+          PYTHONPATH: tests/sidecar-golden
+        run: pytest tests/sidecar-golden/test_python.py -v
+
+  rust-golden:
+    name: Rust sidecar golden
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.88
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar-rs
+
+      # ob2-embedder uses ort with `load-dynamic`, so the binary dlopens
+      # libonnxruntime.so at startup. Ship Microsoft's official ORT 1.24.4
+      # CPU tarball for linux x64 — same major/minor as the GPU build in
+      # the Docker image, so parity is real.
+      - name: Cache ORT runtime
+        id: ort-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/ort
+          key: ort-1.24.4-linux-x64-cpu
+
+      - name: Download ORT runtime
+        if: steps.ort-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/ort"
+          curl -sSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-linux-x64-1.24.4.tgz" \
+            -o /tmp/ort.tgz
+          tar xzf /tmp/ort.tgz -C "${GITHUB_WORKSPACE}/ort" --strip-components=1
+          rm /tmp/ort.tgz
+          ls -la "${GITHUB_WORKSPACE}/ort/lib/"
+
+      - name: Build ob2-sidecar (CPU only)
+        run: cd sidecar-rs && cargo build --release --bin ob2-sidecar
+
+      # The Rust test harness shells out to the Python sidecar too (for
+      # parity ping comparisons), plus we need the python toolchain for pytest.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Cache HuggingFace hub (shared with python-golden job)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-${{ runner.os }}
+
+      - name: Install Python deps (for harness)
+        run: |
+          python -m pip install --upgrade pip
+          # --extra-index-url adds PyTorch's wheel index alongside PyPI so
+          # torch resolves to the CPU-only build (smaller + faster in CI)
+          # while everything else still comes from PyPI.
+          pip install \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            pytest \
+            numpy \
+            pyyaml \
+            sqlite-vec \
+            "sentence-transformers>=2.2" \
+            "torch>=2.0"
+
+      - name: Run golden fixtures (Rust, sqlite)
+        env:
+          OB2_RUST_SIDECAR_BIN: ${{ github.workspace }}/sidecar-rs/target/release/ob2-sidecar
+          # Point the Rust binary at the ORT .so we downloaded above.
+          ORT_DYLIB_PATH: ${{ github.workspace }}/ort/lib/libonnxruntime.so
+          LD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
+          OB2_CONTEXT_ENGINE_PATH: ${{ github.workspace }}/context-engine
+          OB2_EMBEDDING_MODEL: all-MiniLM-L6-v2
+          PYTHONPATH: tests/sidecar-golden
+        run: pytest tests/sidecar-golden/test_rust.py -v -k sqlite

@@ -1,0 +1,16 @@
+.git
+.env
+*.db
+*.db-wal
+*.db-shm
+__pycache__
+*.pyc
+retrieval/.venv
+node_modules
+.ob2.pid
+logs/
+marketing/
+docs/
+tests/
+scratch/
+.build-uid

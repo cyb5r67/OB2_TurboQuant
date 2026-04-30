@@ -1,0 +1,24 @@
+.env
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.DS_Store
+logs/
+.ob2.pid
+users.json
+
+# Test runner output
+tests/results.json
+
+# Embedding model cache and plugin state
+.fastembed_cache/
+.superpowers/
+
+# Runtime-written email recovery state
+server/data/reset-tokens.json
+server/data/reset-tokens.json.tmp.*
+server/data/mail-log.txt

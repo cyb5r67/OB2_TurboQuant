@@ -1,0 +1,39 @@
+[package]
+name = "ob2-embedder"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+ndarray.workspace = true
+parking_lot = "0.12"
+# ort 2.0.x drives ONNX Runtime directly so we can actually register the
+# CUDA execution provider — fastembed 5.x never exposed `ort-cuda` for MiniLM.
+#
+# We use `load-dynamic` (NOT `download-binaries`) because ort's prebuilt
+# artifacts are compiled with `CMAKE_CUDA_ARCHITECTURES` that tops out at
+# SM 9.0; running on Blackwell (RTX 5090, SM 12.0) raises
+# `cudaErrorNoKernelImageForDevice` at first inference. `load-dynamic`
+# dlopens `$ORT_DYLIB_PATH/libonnxruntime.so` at startup, letting us ship
+# Microsoft's official 1.24.4 CUDA 13 build — which includes sm_120 PTX —
+# instead. `ndarray` gives us TensorRef::from_array_view interop.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "tls-rustls", "tracing", "api-24"] }
+# `onig` is the battle-tested regex backend used by the HuggingFace Python
+# tokenizer — the tokenizer.json we load was serialized against it, so we match.
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+hf-hub = { version = "0.5", default-features = false, features = ["ureq", "rustls-tls"] }
+
+[features]
+default = []
+# Routes to ort's CUDA execution provider. At runtime we probe
+# `CUDA::is_available()` to decide between registering it or falling back
+# to CPU, so binaries built with this feature still work on CPU-only hosts.
+cuda = ["ort/cuda"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

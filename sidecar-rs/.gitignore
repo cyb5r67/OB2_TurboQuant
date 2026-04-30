@@ -1,0 +1,7 @@
+target/
+**/*.rs.bk
+Cargo.lock
+# fastembed downloads ONNX model weights into this dir when
+# FASTEMBED_CACHE_PATH is unset. Tests and --warm-embedder both populate it.
+.fastembed_cache/
+**/.fastembed_cache/

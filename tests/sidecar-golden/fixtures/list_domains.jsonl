@@ -1,0 +1,2 @@
+{"expected": {"domains": []}, "name": "empty", "request": {"method": "list_domains", "params": {}}, "seed": []}
+{"expected": {"domains": ["alpha", "zeta"]}, "name": "two-sorted", "request": {"method": "list_domains", "params": {}}, "seed": [{"method": "capture", "params": {"doc_id": "z1", "domain": "zeta", "tags": [], "text": "z"}}, {"method": "capture", "params": {"doc_id": "a1", "domain": "alpha", "tags": [], "text": "a"}}]}

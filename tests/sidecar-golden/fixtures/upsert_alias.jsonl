@@ -1,0 +1,2 @@
+{"expected": {"ok": true}, "name": "basic", "request": {"method": "upsert_alias", "params": {"alias": "db", "canonical": "postgres-01", "domain": "infra"}}, "seed": []}
+{"expected": {"ok": true}, "name": "override", "request": {"method": "upsert_alias", "params": {"alias": "db", "canonical": "postgres-02", "domain": "infra"}}, "seed": [{"method": "upsert_alias", "params": {"alias": "db", "canonical": "old-pg", "domain": "infra"}}]}

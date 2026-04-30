@@ -1,0 +1,225 @@
+# OB2 Full Platform Stack
+#
+# Starts the complete OB2 platform:
+#   - ob2-server:   Deno server + Python sidecar + sentence-transformers
+#   - ob2-postgres: pgvector database (query store)
+#   - ob2-pgadmin:  Database admin UI
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/docker-compose.yml logs -f ob2-server
+#   docker compose -f docker/docker-compose.yml down
+
+name: ob2
+
+services:
+  ob2-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ob2-server
+    restart: unless-stopped
+    environment:
+      OB2_BRAIN_KEY: ${OB2_BRAIN_KEY:-change-me-to-a-random-string}
+      OB2_PORT: "7600"
+      OB2_HOST: "0.0.0.0"
+      OB2_STORAGE_BACKEND: ${OB2_STORAGE_BACKEND:-two-tier}
+      OB2_SQLITE_PATH: /data/ob2.db
+      OB2_PG_URL: postgres://ob2:${OB2_PG_PASSWORD:-ob2secret}@ob2-postgres:5432/ob2
+      # Hardcoded: inside the container, localhost is the container itself.
+      # Must point to host.docker.internal so Ollama (running on the host) is
+      # reachable. Don't template this off OB2_OLLAMA_URL from .env — that
+      # value is "localhost" for host-mode dev.
+      OB2_OLLAMA_URL: http://host.docker.internal:11434
+      # Empty default — when unset in .env, the runtime config (driven by the
+      # dashboard's LLM management tab) is the source of truth. Set
+      # OB2_OLLAMA_MODEL in .env to pin a specific model and disable the
+      # dashboard switcher (the UI surfaces the pinning).
+      OB2_OLLAMA_MODEL: ${OB2_OLLAMA_MODEL:-}
+      # Tells Ollama how long to keep the model loaded in VRAM after each
+      # /api/chat request. Default 5m means the next message after a 5-min
+      # pause pays a 5-10s VRAM-load penalty. "24h" effectively pins the
+      # model in VRAM for any normal-cadence conversation. "-1" pins it
+      # forever; "0" unloads immediately.
+      OB2_OLLAMA_KEEP_ALIVE: ${OB2_OLLAMA_KEEP_ALIVE:-24h}
+      OB2_CONTEXT_ENGINE_PATH: /app/context-engine
+      OB2_PYTHON: /app/retrieval/.venv/bin/python
+      OB2_SIDECAR_SCRIPT: /app/retrieval/sidecar.py
+      # Retrieval-sidecar runtime toggle. Empty (default) = python sidecar;
+      # set to "rust" to use the ob2-sidecar binary baked into the image.
+      OB2_SIDECAR_RUNTIME: ${OB2_SIDECAR_RUNTIME:-}
+      OB2_RUST_SIDECAR_BIN: ${OB2_RUST_SIDECAR_BIN:-/app/sidecar-rs/ob2-sidecar}
+      OB2_USERS_FILE: /data/users.json
+      OB2_RUNTIME_CONFIG_PATH: /data/config.yaml
+      OB2_AUTO_ROUTE: ${OB2_AUTO_ROUTE:-false}
+      # Lightweight Graph RAG (entity extraction + graph-augmented retrieval).
+      # Both flags default off; flip via the dashboard's Config tab once a
+      # backfill has populated entities. extraction_model empty → falls back
+      # to ollama.model (the active chat model).
+      # Empty defaults — env-overrides only kick in when explicitly set in
+      # .env. Otherwise the runtime config in /data/config.yaml drives these
+      # (the dashboard's Config + Graph tabs are the source of truth).
+      OB2_GRAPH_ENABLED: ${OB2_GRAPH_ENABLED:-}
+      OB2_GRAPH_EXTRACTION_ENABLED: ${OB2_GRAPH_EXTRACTION_ENABLED:-}
+      OB2_GRAPH_EXTRACTION_MODEL: ${OB2_GRAPH_EXTRACTION_MODEL:-}
+      OB2_GRAPH_EXTRACTION_CONCURRENCY: ${OB2_GRAPH_EXTRACTION_CONCURRENCY:-}
+      OB2_GRAPH_RERANK_ALPHA: ${OB2_GRAPH_RERANK_ALPHA:-}
+      # Upload provenance — show "uploaded by <user>" in multi-domain chat context.
+      # Set to "false" to suppress from LLM context without removing from the database.
+      OB2_CONTEXT_SHOW_UPLOADER: ${OB2_CONTEXT_SHOW_UPLOADER:-}
+      OB2_SYNC_INTERVAL_SEC: ${OB2_SYNC_INTERVAL_SEC:-5}
+      OB2_SYNC_BATCH_SIZE: ${OB2_SYNC_BATCH_SIZE:-256}
+      OB2_BATCH_FLUSH_MS: ${OB2_BATCH_FLUSH_MS:-100}
+      OB2_BATCH_MAX_SIZE: ${OB2_BATCH_MAX_SIZE:-32}
+      # Email recovery (spec 2) — all optional; unset = email flows disabled.
+      # Each defaults to empty so the admin UI can edit them. Set in .env
+      # to pin them (the UI will show those fields disabled).
+      OB2_SMTP_DRIVER: ${OB2_SMTP_DRIVER:-}
+      OB2_SMTP_HOST: ${OB2_SMTP_HOST:-}
+      OB2_SMTP_PORT: ${OB2_SMTP_PORT:-}
+      OB2_SMTP_USER: ${OB2_SMTP_USER:-}
+      OB2_SMTP_PASS: ${OB2_SMTP_PASS:-}
+      OB2_SMTP_SECURE: ${OB2_SMTP_SECURE:-}
+      OB2_SMTP_FROM: ${OB2_SMTP_FROM:-}
+      OB2_PUBLIC_URL: ${OB2_PUBLIC_URL:-}
+      # Open WebUI integration (spec 2026-04-24-openwebui-chat-design).
+      # ENABLED defaults to false so test/dev setups without the openwebui
+      # sidecar keep working. Generate the service token once with:
+      #   deno run --allow-env --allow-write \
+      #     server/scripts/openwebui-init.ts
+      OB2_OPENWEBUI_ENABLED: ${OB2_OPENWEBUI_ENABLED:-false}
+      OB2_OPENWEBUI_UPSTREAM: ${OB2_OPENWEBUI_UPSTREAM:-http://ob2-openwebui:8080}
+      OB2_OPENWEBUI_SERVICE_TOKEN: ${OB2_OPENWEBUI_SERVICE_TOKEN:-}
+      OB2_OPENWEBUI_PROXY_PORT: ${OB2_OPENWEBUI_PROXY_PORT:-7601}
+      OB2_OPENWEBUI_PUBLIC_URL: ${OB2_OPENWEBUI_PUBLIC_URL:-}
+      # File / URL ingestion via MarkItDown.
+      OB2_IMPORT_MAX_BYTES: ${OB2_IMPORT_MAX_BYTES:-262144000}
+      OB2_IMPORT_SYNC_THRESHOLD_BYTES: ${OB2_IMPORT_SYNC_THRESHOLD_BYTES:-26214400}
+      OB2_IMPORT_SYNC_TIMEOUT_SEC: ${OB2_IMPORT_SYNC_TIMEOUT_SEC:-60}
+      OB2_IMPORT_MCP_TIMEOUT_SEC: ${OB2_IMPORT_MCP_TIMEOUT_SEC:-600}
+      OB2_WHISPER_MODEL: ${OB2_WHISPER_MODEL:-base.en}
+      OB2_WHISPER_DEVICE: ${OB2_WHISPER_DEVICE:-cpu}
+      OB2_OCR_LANGUAGE: ${OB2_OCR_LANGUAGE:-eng}
+      OB2_IMPORT_URL_DENYLIST: ${OB2_IMPORT_URL_DENYLIST:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,::1/128,fc00::/7}
+    ports:
+      - "${OB2_PORT:-7600}:7600"
+      - "${OB2_OPENWEBUI_PROXY_PORT:-7601}:7601"
+    volumes:
+      - ob2_data:/data
+      - ob2_openwebui_data:/openwebui-data
+    depends_on:
+      ob2-postgres:
+        condition: service_healthy
+    # GPU passthrough for the Rust sidecar's ORT CUDA execution provider.
+    # Requires Docker Compose 2.x + nvidia-container-toolkit on the host
+    # (both verified). On hosts without a GPU the container still runs —
+    # register_providers() probes CUDA::is_available() and falls back to CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7600/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  ob2-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: ob2-postgres
+    restart: unless-stopped
+    ports:
+      - "${OB2_PG_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ob2
+      POSTGRES_USER: ob2
+      POSTGRES_PASSWORD: ${OB2_PG_PASSWORD:-ob2secret}
+    volumes:
+      - ob2_pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ob2 -d ob2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  ob2-pgadmin:
+      image: dpage/pgadmin4:latest
+      container_name: ob2-pgadmin
+      restart: unless-stopped
+      ports:
+        - "${OB2_PGADMIN_PORT:-5051}:80"
+      environment:
+        PGADMIN_DEFAULT_EMAIL: admin@ob2.com
+        PGADMIN_DEFAULT_PASSWORD: ${OB2_PG_PASSWORD:-ob2secret}
+      depends_on:
+        ob2-postgres:
+          condition: service_healthy
+
+  # Open WebUI — chat surface for logged-in OB2 users.
+  # See docs/superpowers/specs/2026-04-24-openwebui-chat-design.md.
+  # Not host-published. Reached only via the ob2-server reverse proxy on
+  # OB2_OPENWEBUI_PROXY_PORT (default 7601), which adds X-Forwarded-Email
+  # so Open WebUI's trusted-header SSO logs the user in as themselves.
+  ob2-openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: ob2-openwebui
+    restart: unless-stopped
+    profiles: ["openwebui"]
+    environment:
+      WEBUI_AUTH_TRUSTED_EMAIL_HEADER: X-Forwarded-Email
+      WEBUI_AUTH_TRUSTED_NAME_HEADER: X-OB2-User
+      ENABLE_SIGNUP: "false"
+      OPENAI_API_BASE_URL: http://ob2-server:7600/v1
+      OPENAI_API_KEY: ${OB2_OPENWEBUI_SERVICE_TOKEN:-}
+      WEBUI_URL: ${OB2_OPENWEBUI_PUBLIC_URL:-http://localhost:7601}
+      # Force all chat traffic through OB2's /v1 gateway. If left on, Open
+      # WebUI auto-discovers Ollama at host.docker.internal:11434 and lets
+      # users pick raw models (gemma3:4b etc.) that bypass OB2 — which means
+      # no RAG, no per-domain ACL, no impersonation. Disabling the Ollama
+      # integration keeps the dropdown limited to the virtual "ob2" and
+      # "ob2-<domain>" models /v1/models returns.
+      ENABLE_OLLAMA_API: "false"
+      # Forward the logged-in user's identity on every upstream /v1/chat/
+      # completions call (headers X-OpenWebUI-User-Name, -Email, -Id, -Role).
+      # OB2's bearerAuthMulti accepts X-OpenWebUI-User-Name as an alternative
+      # to X-OB2-User for service-token impersonation, so per-user ACL +
+      # retrieval apply to every chat.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      # OB2 is the authz gate — anyone who reaches Open WebUI has already
+      # been authorized by OB2. Open WebUI's default "pending" role is
+      # double-gating that adds nothing. Make every new signin usable
+      # immediately. The first trusted-header signin still becomes the
+      # Open WebUI admin (an Open WebUI invariant we don't control).
+      DEFAULT_USER_ROLE: user
+      # Models from external OpenAI-compatible connections are admin-only by
+      # default — regular users see an empty model dropdown and "model not
+      # selected" errors. OB2 has already authenticated and authorized every
+      # caller before they reach Open WebUI, so per-role model gating inside
+      # Open WebUI is redundant. Bypass it.
+      BYPASS_MODEL_ACCESS_CONTROL: "true"
+      # Temporary — surface upstream HTTP calls in logs so we can see what
+      # Open WebUI actually sends to OB2's /v1/chat/completions. Drop to
+      # INFO once the chat round-trip is confirmed working end-to-end.
+      # GLOBAL_LOG_LEVEL: DEBUG  # re-enable when debugging chat
+    volumes:
+      - ob2_openwebui_data:/app/backend/data
+    depends_on:
+      ob2-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  ob2_data:
+  ob2_pgdata:
+  ob2_openwebui_data:

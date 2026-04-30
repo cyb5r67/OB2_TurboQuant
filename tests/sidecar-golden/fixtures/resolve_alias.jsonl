@@ -1,0 +1,2 @@
+{"expected": {"canonical": "postgres-01"}, "name": "present", "request": {"method": "resolve_alias", "params": {"alias": "db", "domain": "infra"}}, "seed": [{"method": "upsert_alias", "params": {"alias": "db", "canonical": "postgres-01", "domain": "infra"}}]}
+{"expected": {"canonical": null}, "name": "missing", "request": {"method": "resolve_alias", "params": {"alias": "ghost", "domain": "infra"}}, "seed": []}

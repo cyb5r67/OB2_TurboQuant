@@ -1,0 +1,2 @@
+{"expected": {"ok": true}, "name": "basic", "request": {"method": "record_source", "params": {"chunks_produced": 5, "content_hash": "abc", "domain": "infra", "source_id": "hosts.csv"}}, "seed": []}
+{"expected": {"ok": true}, "name": "overwrite", "request": {"method": "record_source", "params": {"chunks_produced": 7, "content_hash": "new", "domain": "infra", "source_id": "hosts.csv"}}, "seed": [{"method": "record_source", "params": {"chunks_produced": 2, "content_hash": "old", "domain": "infra", "source_id": "hosts.csv"}}]}

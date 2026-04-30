@@ -1,0 +1,25 @@
+[project]
+name = "ob2-retrieval"
+version = "0.1.0"
+description = "OB2 retrieval sidecar — context-engine wrapper with JSON-RPC stdio interface"
+requires-python = ">=3.10"
+dependencies = [
+  "markitdown[all]>=0.1.5,<0.2",
+  "numpy>=1.26",
+  # context-engine is loaded via PYTHONPATH at runtime; not pinned here
+  # sentence-transformers is optional (context-engine falls back to TF-IDF without it)
+]
+
+[project.optional-dependencies]
+# Enable for CUDA-accelerated embedding on 5090
+gpu = [
+  "sentence-transformers>=2.2",
+  "torch>=2.0",
+]
+sqlite = [
+  "sqlite-vec>=0.1",
+]
+pgvector = [
+  "psycopg[pool,binary]>=3.1",
+  "pgvector>=0.2",
+]

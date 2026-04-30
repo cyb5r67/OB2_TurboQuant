@@ -1,0 +1,1 @@
+{"expected": {"backend": "sqlite", "batcher": null, "embedder": true, "pong": true}, "name": "basic", "request": {"method": "ping", "params": {}}, "seed": []}

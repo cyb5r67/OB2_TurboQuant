@@ -1,0 +1,2 @@
+{"expected": {"aliases": []}, "name": "empty", "request": {"method": "list_aliases", "params": {"domain": "infra"}}, "seed": []}
+{"expected": {"aliases": [{"alias": "db", "canonical": "postgres-01"}, {"alias": "web", "canonical": "web-01"}]}, "name": "two-sorted", "request": {"method": "list_aliases", "params": {"domain": "infra"}}, "seed": [{"method": "upsert_alias", "params": {"alias": "web", "canonical": "web-01", "domain": "infra"}}, {"method": "upsert_alias", "params": {"alias": "db", "canonical": "postgres-01", "domain": "infra"}}]}

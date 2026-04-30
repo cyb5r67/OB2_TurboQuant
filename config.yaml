@@ -1,0 +1,29 @@
+# OB2 runtime configuration — hot-reloaded on file change.
+#
+# This file contains operational knobs that admins can tune at runtime via
+# the dashboard (Config tab) or by editing directly. Boot-time settings
+# (port, host, auth key, storage paths) remain in environment variables.
+#
+# Precedence: env var > this file > hardcoded default.
+# Any OB2_* env var takes precedence over the matching field here.
+
+ollama:
+  url: http://localhost:11434
+  model: gemma3:4b
+  classifier_model: ""    # blank = use `model` above
+  auto_route: false       # opt-in: classify queries without @prefix
+
+embedder:
+  model: all-MiniLM-L6-v2
+  dim: 384
+  batch_flush_ms: 100     # wait at most this long before firing a batch
+  batch_max_size: 32      # fire immediately at this many queued docs
+
+sync:
+  interval_sec: 5         # two-tier SyncWorker flush period
+  batch_size: 256
+
+retrieval:
+  default_top_k: 5
+  hybrid_alpha: 0.65      # 0 = pure TF-IDF, 1 = pure embeddings
+  total_token_budget: 2048

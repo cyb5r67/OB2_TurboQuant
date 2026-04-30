@@ -1,0 +1,1 @@
+{"expected": {"error": "not in two-tier mode"}, "name": "not-two-tier", "request": {"method": "sync_status", "params": {}}, "seed": []}

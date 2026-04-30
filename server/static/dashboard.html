@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OB2 Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #38bdf8; --green: #4ade80; --red: #f87171; --yellow: #fbbf24; --purple: #a78bfa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  .container { max-width: 1300px; margin: 0 auto; padding: 1.5rem 2rem; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  h1 { font-size: 1.5rem; }
+  h1 small { color: var(--muted); font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem; }
+  h2 { font-size: 1.1rem; color: var(--accent); margin: 0 0 0.75rem; }
+  .who { color: var(--muted); font-size: 0.85rem; }
+  .who code { color: var(--text); background: var(--card); padding: 2px 6px; border-radius: 4px; }
+  nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; overflow-x: auto; }
+  nav a { color: var(--muted); padding: 0.75rem 1.25rem; text-decoration: none; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav a:hover:not(.active) { color: var(--text); }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .card h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+  .stat { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .stat.small { font-size: 1.25rem; }
+  .stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .badge-green { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-red { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .badge-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
+  .badge-muted { background: rgba(148,163,184,0.15); color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  .mono { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; font-size: 0.8rem; }
+  button { background: var(--accent); color: var(--bg); border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: var(--border); color: var(--text); }
+  button.danger { background: rgba(248,113,113,0.2); color: var(--red); }
+  button.danger:hover { background: rgba(248,113,113,0.35); }
+  button.small { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+  input, select, textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.85rem; font-family: inherit; }
+  textarea { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; font-size: 0.82rem; width: 100%; min-height: 360px; resize: vertical; }
+  .form-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
+  .error-toast { position: fixed; top: 1rem; right: 1rem; background: rgba(248,113,113,0.15); border: 1px solid var(--red); color: var(--red); padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.85rem; max-width: 400px; display: none; z-index: 100; }
+  .success-toast { position: fixed; top: 1rem; right: 1rem; background: rgba(74,222,128,0.15); border: 1px solid var(--green); color: var(--green); padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.85rem; max-width: 400px; display: none; z-index: 100; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 200; }
+  .modal-bg.show { display: flex; }
+  .modal { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; max-width: 560px; width: 90%; max-height: 90vh; overflow-y: auto; }
+  .modal h3 { margin-bottom: 1rem; color: var(--accent); }
+  .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+  .source-pill { display: inline-block; font-size: 0.68rem; padding: 1px 6px; border-radius: 3px; margin-left: 0.5rem; }
+  .source-env { background: rgba(251,191,36,0.2); color: var(--yellow); }
+  .source-file { background: rgba(56,189,248,0.15); color: var(--accent); }
+  .perm-tag { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; margin: 0 3px 3px 0; background: rgba(167,139,250,0.15); color: var(--purple); }
+  details summary { cursor: pointer; padding: 0.25rem 0; color: var(--accent); font-size: 0.85rem; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.75rem; overflow-x: auto; max-height: 200px; }
+  /* In-page login screen */
+  #login-screen { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 1000; align-items: center; justify-content: center; padding: 2rem; }
+  #login-screen.show { display: flex; }
+  #login-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 2.5rem; max-width: 440px; width: 100%; box-shadow: 0 8px 40px rgba(0,0,0,0.4); }
+  #login-card h1 { margin-bottom: 0.25rem; }
+  #login-card .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  #login-card label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.4rem; }
+  #login-card input { width: 100%; padding: 0.6rem 0.75rem; font-size: 0.9rem; }
+  #login-card button { margin-top: 1rem; width: 100%; padding: 0.65rem; font-size: 0.95rem; }
+  #login-error { color: var(--red); font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2em; }
+  #login-hint { color: var(--muted); font-size: 0.75rem; margin-top: 1rem; text-align: center; }
+  #login-hint code { background: var(--bg); padding: 2px 6px; border-radius: 3px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  /* Hide app until authenticated */
+  #app { display: none; }
+  #app.show { display: block; }
+  .import-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .import-zone.drag-over { border-color: var(--accent); background: rgba(56,189,248,0.08); }
+  .import-zone .formats { color: var(--muted); font-size: 0.72rem; margin-top: 0.4rem; }
+  .import-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+  .import-recent { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.75rem; }
+  .import-recent .row { display: flex; gap: 0.4rem; padding: 2px 0; }
+  .import-recent .ok { color: var(--green); }
+  .import-recent .err { color: var(--red); }
+  .import-recent .pending { color: var(--yellow); }
+</style>
+</head>
+<body>
+
+<div id="error-toast" class="error-toast"></div>
+<div id="success-toast" class="success-toast"></div>
+
+<!-- Login screen -->
+<div id="login-screen">
+  <div id="login-card">
+    <h1>OB2 Dashboard</h1>
+    <div class="subtitle">Team RAG Platform — Admin Console</div>
+    <label for="login-username">Username</label>
+    <input id="login-username" type="text" autofocus autocomplete="username"
+           autocapitalize="none" autocorrect="off" spellcheck="false">
+    <label for="login-password" style="margin-top:0.75rem">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <button data-action="attempt-login">Sign in</button>
+    <div id="login-error"></div>
+    <div style="margin-top:0.75rem">
+      <a href="#" data-action="show-forgot-password" style="color:var(--accent);font-size:0.9rem">Forgot password?</a>
+    </div>
+    <div id="login-hint"></div>
+  </div>
+</div>
+
+<div id="reset-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:1500;padding-top:10vh">
+  <div style="max-width:420px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:1.5rem">
+    <h2 id="reset-heading" style="margin-top:0">Reset your password</h2>
+    <p id="reset-subtitle" style="color:var(--muted);font-size:0.9rem;margin-top:0.25rem"></p>
+    <label for="reset-new-password" style="font-size:0.85rem;color:var(--muted)">New password</label>
+    <input id="reset-new-password" type="password" autocomplete="new-password" style="width:100%;margin-bottom:0.75rem">
+    <label for="reset-confirm" style="font-size:0.85rem;color:var(--muted)">Confirm password</label>
+    <input id="reset-confirm" type="password" autocomplete="new-password" style="width:100%;margin-bottom:0.75rem">
+    <div id="reset-status" style="color:var(--muted);font-size:0.85rem;min-height:1.2em;margin-bottom:0.5rem"></div>
+    <button data-action="submit-reset" style="width:100%">Set password</button>
+  </div>
+</div>
+
+<div id="forgot-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:1.5rem;max-width:420px;margin:auto">
+    <h3 style="margin-top:0">Reset your password</h3>
+    <p style="color:var(--muted);font-size:0.9rem">Enter your recovery email. We'll send a link to choose a new password.</p>
+    <input id="forgot-email" type="email" placeholder="you@example.com" style="width:100%;margin-bottom:0.75rem">
+    <div id="forgot-status" style="color:var(--muted);font-size:0.85rem;min-height:1.2em;margin-bottom:0.5rem"></div>
+    <div style="display:flex;justify-content:flex-end;gap:0.5rem">
+      <button class="secondary" data-action="close-forgot-modal">Cancel</button>
+      <button data-action="send-forgot-request">Send link</button>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="container">
+  <header>
+    <h1>OB2 Dashboard <small>Team RAG Platform</small></h1>
+    <span class="who" id="whoami"></span>
+  </header>
+
+  <nav id="nav">
+    <a data-tab="overview" class="active">Overview</a>
+    <a data-tab="domains">Domains</a>
+    <a data-tab="users">Users</a>
+    <a data-tab="services">Services</a>
+    <a data-tab="llms">LLMs</a>
+    <a data-tab="graph">Graph</a>
+    <a data-tab="config">Config</a>
+    <a data-tab="processes">Processes</a>
+    <a data-tab="profile">Profile</a>
+    <a id="nav-chat" href="/auth/openwebui-handoff" target="_blank" rel="noopener" style="display:none">Chat ↗</a>
+  </nav>
+
+  <!-- ========== OVERVIEW ========== -->
+  <section id="tab-overview" class="tab active">
+    <h2>At a glance</h2>
+    <div class="grid" id="overview-grid"></div>
+
+    <div id="backend-section">
+      <h2 style="margin-top: 1.5rem">Storage backend</h2>
+      <div class="card" id="backend-card"></div>
+    </div>
+  </section>
+
+  <!-- ========== DOMAINS ========== -->
+  <section id="tab-domains" class="tab">
+    <h2>Domains</h2>
+    <div id="domains-container"></div>
+  </section>
+
+  <!-- ========== USERS ========== -->
+  <section id="tab-users" class="tab">
+    <h2>Create user</h2>
+    <div class="card">
+      <div class="form-row">
+        <input id="new-username" placeholder="Username" style="width:180px">
+        <select id="new-user-admin">
+          <option value="false">Regular user</option>
+          <option value="true">Global admin</option>
+        </select>
+      </div>
+      <label style="font-size:0.85rem;color:var(--muted);margin-top:0.5rem">Email (optional)</label>
+      <input id="new-user-email" type="email" placeholder="user@example.com" style="flex:1">
+
+      <label style="font-size:0.85rem;color:var(--muted);margin-top:0.5rem">Initial sign-in</label>
+      <div id="new-user-init" style="display:flex;gap:1rem;font-size:0.9rem">
+        <label><input type="radio" name="new-user-init-mode" value="password" checked> Set password now</label>
+        <label><input type="radio" name="new-user-init-mode" value="invite" id="new-user-invite-radio"> Send invite email</label>
+      </div>
+      <div id="new-user-password-wrap">
+        <input id="new-user-password" type="password" placeholder="initial password (8+ chars)" style="width:100%">
+      </div>
+      <div id="new-user-invite-hint" style="display:none;color:var(--muted);font-size:0.85rem"></div>
+
+      <div class="form-row" style="margin-top:0.5rem">
+        <button data-action="create-new-user">Create</button>
+        <span id="new-user-status" style="color:var(--muted);font-size:0.8rem"></span>
+      </div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:0.4rem">
+        Permissions can be added after creation via the Edit button below.
+      </div>
+    </div>
+
+    <h2 style="margin-top:1.5rem">Users</h2>
+    <div id="users-container"></div>
+
+    <details class="raw-editor" style="margin-top:2rem; border:1px solid var(--border); border-radius:4px; padding:0.75rem">
+      <summary style="cursor:pointer; color:var(--muted); font-size:0.9rem">
+        Advanced: edit <code>users.json</code> directly
+      </summary>
+      <div style="color:var(--muted); font-size:0.85rem; margin:0.5rem 0">
+        Shown to global admins only. Edits bypass typed validation beyond JSON schema.
+        Passwords and API-key hashes are shown as-is. The zero-global-admin rail still applies.
+      </div>
+      <textarea id="raw-users-yaml" spellcheck="false" style="width:100%; min-height:300px; font-family:monospace; font-size:0.85rem"></textarea>
+      <div class="form-row" style="margin-top:0.5rem">
+        <button data-action="save-raw-users">Save</button>
+        <button class="secondary" data-action="load-raw-users">Reload</button>
+        <span id="raw-users-status" style="color:var(--muted); font-size:0.8rem"></span>
+      </div>
+    </details>
+  </section>
+
+  <!-- ========== SERVICES ========== -->
+  <section id="tab-services" class="tab">
+    <h2>Ollama</h2>
+    <div class="card" id="ollama-card"></div>
+
+    <h2 style="margin-top:1.5rem">pgvector</h2>
+    <div class="card" id="pgvector-card"></div>
+  </section>
+
+  <!-- ========== CONFIG ========== -->
+  <!-- ========== LLM MANAGEMENT ========== -->
+  <section id="tab-llms" class="tab">
+    <h2>LLM Management
+      <span style="color:var(--muted); font-size:0.8rem; font-weight:400; margin-left:0.5rem">
+        powered by Ollama at <span id="llms-ollama-url" class="mono"></span>
+      </span>
+    </h2>
+    <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.75rem">
+      Switch the active chat model, pull new models from the Ollama registry,
+      and remove ones you no longer need. Changes apply immediately to every
+      chat surface (Open WebUI, MCP, the OpenAI-compatible gateway).
+    </div>
+
+    <div class="card" id="llms-active-card" style="margin-bottom:1rem">
+      <div style="font-size:0.85rem;color:var(--muted)">Active model</div>
+      <div id="llms-active-name" class="mono" style="font-size:1.1rem;margin:0.25rem 0">…</div>
+      <div id="llms-active-meta" style="font-size:0.85rem;color:var(--muted)"></div>
+      <div id="llms-env-pinned-warning" style="display:none;margin-top:0.5rem;padding:0.5rem;background:rgba(239,200,60,0.08);border-left:3px solid var(--yellow);font-size:0.85rem"></div>
+    </div>
+
+    <h2 style="margin-top:1rem">Switch active model</h2>
+    <div class="card">
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <select id="llms-switch-select" style="flex:1"></select>
+        <button data-action="apply-llm-switch">Apply</button>
+      </div>
+      <div id="llms-switch-status" style="font-size:0.85rem;margin-top:0.4rem;min-height:1rem;color:var(--muted)"></div>
+    </div>
+
+    <h2 style="margin-top:1rem">Pull a new model</h2>
+    <div class="card">
+      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.5rem">
+        Names follow Ollama conventions: <code>llama3.1:8b</code>,
+        <code>qwen2.5-coder:32b-instruct</code>, etc.
+        Browse <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library</a>.
+      </div>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <input id="llms-pull-input" type="text" placeholder="model:tag" style="flex:1" autocomplete="off">
+        <button data-action="start-llm-pull">Pull</button>
+      </div>
+      <div id="llms-pull-jobs" style="margin-top:0.75rem"></div>
+    </div>
+
+    <h2 style="margin-top:1rem">Installed models</h2>
+    <div id="llms-installed-container"></div>
+  </section>
+
+  <!-- ========== GRAPH ========== -->
+  <section id="tab-graph" class="tab">
+    <h2>Knowledge Graph
+      <span style="color:var(--muted); font-size:0.8rem; font-weight:400; margin-left:0.5rem">
+        per-domain entities + relationships, plus cross-domain overlap
+      </span>
+    </h2>
+    <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.75rem">
+      Graph data is built by an async LLM extractor. Toggle <code>graph.extraction_enabled</code>
+      in the Config tab to extract on capture; run a backfill below to process docs already in the store.
+      Toggle <code>graph.enabled</code> to use the graph for retrieval reranking during chat.
+    </div>
+
+    <div class="card" id="graph-status-card" style="margin-bottom:1rem">
+      <div id="graph-status-line" style="font-size:0.85rem;color:var(--muted)"></div>
+    </div>
+
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
+      <label style="font-size:0.85rem;color:var(--muted)">View</label>
+      <select id="graph-view-select">
+        <option value="domain">Per-domain</option>
+        <option value="overlap">Cross-domain overlap</option>
+      </select>
+      <span id="graph-domain-controls" style="display:flex;gap:0.5rem;align-items:center">
+        <label style="font-size:0.85rem;color:var(--muted)">Domain</label>
+        <select id="graph-domain-select" style="min-width:200px"></select>
+        <button class="small" data-action="reload-graph">Reload</button>
+        <button class="small secondary" data-action="start-graph-backfill">Backfill</button>
+        <a id="graph-fullscreen-link" href="/graph" target="_blank" rel="noopener"
+           class="small secondary" style="padding:0.3rem 0.6rem;font-size:0.75rem;background:var(--border);color:var(--text);border-radius:6px;text-decoration:none;white-space:nowrap;display:inline-block;font-weight:600">Open full-screen ↗</a>
+        <a id="graph-gexf-link" href="#" download
+           class="small secondary" style="padding:0.3rem 0.6rem;font-size:0.75rem;background:var(--border);color:var(--text);border-radius:6px;text-decoration:none;white-space:nowrap;display:inline-block;font-weight:600">Export GEXF ↓</a>
+      </span>
+    </div>
+    <div id="graph-backfill-status" style="font-size:0.85rem;margin-bottom:0.5rem;min-height:1rem"></div>
+
+    <div style="display:flex;gap:0.75rem;align-items:flex-start">
+      <div id="graph-canvas" style="flex:1;height:560px;border:1px solid var(--border);border-radius:6px;background:#0a0e16"></div>
+      <div id="graph-side-panel" style="width:320px;max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:0.75rem;font-size:0.85rem">
+        <div style="color:var(--muted)">Click a node to see details.</div>
+      </div>
+    </div>
+
+    <div id="graph-legend" style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem"></div>
+  </section>
+
+  <section id="tab-config" class="tab">
+    <h2>Runtime configuration
+      <span id="config-path" style="color:var(--muted); font-size:0.8rem; font-weight:400; margin-left:0.5rem"></span>
+    </h2>
+    <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.5rem">
+      Edit the YAML below and Save. Changes are hot-reloaded by the server — no restart needed.
+      Env vars still take precedence over file values.
+    </div>
+    <textarea id="config-yaml" spellcheck="false"></textarea>
+    <div class="form-row">
+      <button data-action="save-config">Save</button>
+      <button class="secondary" data-action="load-config">Reload</button>
+      <span id="config-status" style="color:var(--muted); font-size:0.8rem"></span>
+    </div>
+
+    <h2 style="margin-top:1.5rem">Env overrides (read-only)</h2>
+    <div id="env-overrides-container"></div>
+
+    <h2 style="margin-top:1.5rem">Email (SMTP)</h2>
+    <div class="card">
+      <div id="smtp-status-indicator" style="margin-bottom:0.5rem;font-size:0.9rem"></div>
+      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.75rem">
+        Fields below save to <code>config.yaml</code> and hot-reload — no restart.
+        Env vars (<code>OB2_SMTP_*</code>, <code>OB2_PUBLIC_URL</code>) always win over these values;
+        env-pinned fields are shown greyed out.
+      </div>
+      <div id="mail-form" style="display:grid;grid-template-columns:max-content 1fr;gap:0.5rem 0.75rem;align-items:center">
+        <label for="mail-driver">Driver</label>
+        <select id="mail-driver" style="width:100%">
+          <option value="">Disabled</option>
+          <option value="smtp">SMTP (production)</option>
+          <option value="log">Log (test only — mail appended to server/data/mail-log.txt)</option>
+        </select>
+
+        <label for="mail-host">Host</label>
+        <input id="mail-host" type="text" placeholder="smtp.gmail.com" style="width:100%">
+
+        <label for="mail-port">Port</label>
+        <input id="mail-port" type="number" placeholder="587" min="1" max="65535" style="width:100%">
+
+        <label for="mail-user">Username</label>
+        <input id="mail-user" type="text" placeholder="you@example.com or apikey" style="width:100%" autocomplete="off">
+
+        <label for="mail-pass">Password</label>
+        <input id="mail-pass" type="password" placeholder="leave blank to keep current" style="width:100%" autocomplete="new-password">
+
+        <label for="mail-secure">Security</label>
+        <select id="mail-secure" style="width:100%">
+          <option value="starttls">STARTTLS (port 587 — Gmail, most providers)</option>
+          <option value="tls">Direct TLS (port 465)</option>
+          <option value="none">None — plaintext (local dev only)</option>
+        </select>
+
+        <label for="mail-from">From address</label>
+        <input id="mail-from" type="text" placeholder='OB2 &lt;noreply@yourdomain.com&gt;' style="width:100%">
+
+        <label for="mail-public-url">Public URL</label>
+        <input id="mail-public-url" type="text" placeholder="https://ob2.yourdomain.com" style="width:100%">
+      </div>
+
+      <div class="form-row" style="margin-top:0.75rem">
+        <button data-action="save-mail-config">Save</button>
+        <button class="secondary" data-action="load-mail-config">Reload</button>
+        <span id="mail-save-status" style="color:var(--muted);font-size:0.8rem"></span>
+      </div>
+
+      <hr style="margin:1rem 0;border:none;border-top:1px solid var(--border)">
+      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.5rem">
+        Send a test email to confirm the server can reach your SMTP host.
+      </div>
+      <div class="form-row" style="margin-top:0.5rem">
+        <input id="smtp-test-to" type="email" placeholder="send a diagnostic to you@example.com" style="flex:1">
+        <button data-action="send-smtp-test">Send test email</button>
+        <span id="smtp-test-status" style="color:var(--muted);font-size:0.8rem"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== PROFILE ========== -->
+  <section id="tab-profile" class="tab">
+    <h2>Account</h2>
+    <div class="card" id="profile-summary"></div>
+
+    <h2 style="margin-top:1.5rem">Recovery email</h2>
+    <div class="card">
+      <div id="profile-email-display" style="font-family:monospace;color:var(--muted)">—</div>
+      <div id="profile-email-banner" style="display:none;background:var(--warn-bg,#fff3cd);border:1px solid var(--warn-border,#ffe69c);padding:0.5rem 0.75rem;border-radius:4px;margin:0.5rem 0;font-size:0.9rem">
+        No recovery email set. You won't be able to reset your password without an admin.
+      </div>
+      <div class="form-row" style="margin-top:0.5rem">
+        <input id="profile-email-input" type="email" placeholder="you@example.com" style="flex:1">
+        <button data-action="save-profile-email">Save</button>
+        <button class="secondary" data-action="clear-profile-email">Clear</button>
+        <span id="profile-email-status" style="color:var(--muted);font-size:0.8rem"></span>
+      </div>
+    </div>
+
+    <h2 style="margin-top:1.5rem" id="profile-pw-heading">Change password</h2>
+    <div class="card" id="profile-pw-card">
+      <div id="profile-pw-hint" style="color:var(--muted); font-size:0.85rem; margin-bottom:0.5rem"></div>
+      <div class="form-row" id="profile-pw-current-row">
+        <input id="profile-pw-current" type="password" placeholder="Current password"
+               autocomplete="current-password" style="flex:1; min-width:220px">
+      </div>
+      <div class="form-row">
+        <input id="profile-pw-next" type="password" placeholder="New password (min 8 chars)"
+               autocomplete="new-password" style="flex:1; min-width:220px">
+        <input id="profile-pw-confirm" type="password" placeholder="Confirm new password"
+               autocomplete="new-password" style="flex:1; min-width:220px">
+      </div>
+      <div class="form-row">
+        <button data-action="change-password">Update password</button>
+        <span id="profile-pw-status" style="color:var(--muted); font-size:0.8rem"></span>
+      </div>
+    </div>
+
+    <h2 style="margin-top:1.5rem" id="profile-key-heading">API key</h2>
+    <div class="card" id="profile-key-card">
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom:0.5rem">
+        Machine clients (MCP, OpenAI-compat gateway, CLI) sign in with an API key via
+        <code>Authorization: Bearer</code> or <code>x-brain-key</code>. Rotating invalidates
+        the old key immediately.
+      </div>
+      <div class="form-row">
+        <button data-action="rotate-key" id="rotate-key-btn">Rotate API key</button>
+        <span id="profile-key-status" style="color:var(--muted); font-size:0.8rem"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== PROCESSES ========== -->
+  <section id="tab-processes" class="tab">
+    <h2>Embedder (auto-batcher)</h2>
+    <div class="grid" id="batcher-grid"></div>
+
+    <h2 style="margin-top:1.5rem">Sync worker (two-tier)</h2>
+    <div class="grid" id="sync-grid"></div>
+
+    <h2 style="margin-top:1.5rem">Classifier (auto-routing)</h2>
+    <div class="grid" id="classifier-grid"></div>
+    <details style="margin-top:0.5rem">
+      <summary>Recent decisions (last 100)</summary>
+      <div id="classifier-recent" style="margin-top:0.5rem"></div>
+    </details>
+  </section>
+</div> <!-- /#app -->
+
+<!-- ========== Modals ========== -->
+<!-- Backdrop click-to-close is handled in the central click listener
+     in dashboard.js: it closes the modal only when the click target is
+     the backdrop itself, not a child element (the modal card). -->
+<div id="modal-bg" class="modal-bg">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+
+<script src="/vendor/cytoscape.min.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

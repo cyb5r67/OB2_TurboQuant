@@ -1,0 +1,25 @@
+[package]
+name = "ob2-storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+rusqlite = { version = "0.32", features = ["bundled", "load_extension", "blob"] }
+sqlite-vec = "0.1"
+parking_lot = "0.12"
+chrono.workspace = true
+ndarray.workspace = true
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4"] }
+pgvector = { version = "0.4", features = ["postgres"] }
+deadpool-postgres = "0.14"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,2 @@
+{"expected": {"deleted": true}, "name": "existing", "request": {"method": "delete", "params": {"doc_id": "d1", "domain": "infra"}}, "seed": [{"method": "capture", "params": {"doc_id": "d1", "domain": "infra", "tags": [], "text": "hello"}}]}
+{"expected": {"deleted": false}, "name": "missing", "request": {"method": "delete", "params": {"doc_id": "ghost", "domain": "infra"}}, "seed": []}

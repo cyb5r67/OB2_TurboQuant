@@ -1,0 +1,31 @@
+[package]
+name = "ob2-sidecar"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "ob2-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+parking_lot = "0.12"
+regex = "1"
+tokio-postgres = "0.7"
+ob2-embedder = { path = "../ob2-embedder" }
+ob2-storage = { path = "../ob2-storage" }
+ob2-retriever = { path = "../ob2-retriever" }
+ob2-context = { path = "../ob2-context" }
+
+[features]
+default = []
+# Forwards to ob2-embedder/cuda so `cargo build --features cuda` on this
+# binary crate (what the Dockerfile does) enables ORT's CUDA execution
+# provider without callers needing to know the embedder crate's name.
+cuda = ["ob2-embedder/cuda"]
