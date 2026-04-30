@@ -58,5 +58,58 @@ const FIXTURE = `${REPO_ROOT}tests/fixtures/sample.gguf`;
   await Deno.remove(dir, { recursive: true });
 }
 
+// Case 6: parser walks past a type-9 array to reach later KVs (e.g. quant_version)
+{
+  // Build a tiny GGUF in-memory: magic + ver=3 + 0 tensors + 3 KVs:
+  //   1) general.architecture = "qwen2"
+  //   2) tokenizer.ggml.tokens = ["a", "b"] (string array)
+  //   3) general.quantization_version = 4 (uint32)
+  const dir = await Deno.makeTempDir();
+  const path = `${dir}/array-fixture.gguf`;
+
+  // Helpers
+  const enc = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  const u8 = (v: number) => { const b = new Uint8Array(1); new DataView(b.buffer).setUint8(0, v); chunks.push(b); };
+  const u32 = (v: number) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v, true); chunks.push(b); };
+  const u64 = (v: number | bigint) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(v), true); chunks.push(b); };
+  const str = (s: string) => { const e = enc.encode(s); u64(e.length); chunks.push(e); };
+
+  chunks.push(enc.encode("GGUF"));
+  u32(3);                                // version
+  u64(0);                                // 0 tensors
+  u64(3);                                // 3 KVs
+
+  // KV 1: general.architecture = "qwen2"
+  str("general.architecture");
+  u32(8);                                // string type
+  str("qwen2");
+
+  // KV 2: tokenizer.ggml.tokens = ["a", "b"] (array of string)
+  str("tokenizer.ggml.tokens");
+  u32(9);                                // array type
+  u32(8);                                // inner_type = string
+  u64(2);                                // count = 2
+  str("a");
+  str("b");
+
+  // KV 3: general.quantization_version = 4
+  str("general.quantization_version");
+  u32(4);                                // uint32 type
+  u32(4);                                // value
+
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const merged = new Uint8Array(total);
+  let p = 0;
+  for (const c of chunks) { merged.set(c, p); p += c.length; }
+  await Deno.writeFile(path, merged);
+
+  const parsed = await parseGgufHeader(path);
+  assert(parsed?.arch === "qwen2", `arch === "qwen2" (got ${parsed?.arch})`);
+  assert(parsed?.quant === "Q4", `quant === "Q4" (got ${parsed?.quant}) — array skip lets parser reach quant`);
+  await Deno.remove(dir, { recursive: true });
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll models tests passed.");

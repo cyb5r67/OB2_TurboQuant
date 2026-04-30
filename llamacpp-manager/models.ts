@@ -20,8 +20,12 @@ export interface ModelInfo {
 }
 
 const GGUF_MAGIC = new Uint8Array([0x47, 0x47, 0x55, 0x46]); // "GGUF"
-// Read up to 4 KB of header — enough for the magic + a few KV pairs.
-const HEADER_READ_BYTES = 4096;
+// 64 KB is enough to walk past most tokenizer arrays and reach the
+// post-tokenizer scalar metadata (quant version, file type, parameter count).
+// llama-3-class tokenizers (~128k tokens × ~5 bytes/token) push this near the
+// limit but typically still leave the architecture-specific scalars and the
+// general.* tail readable.
+const HEADER_READ_BYTES = 65536;
 
 export async function parseGgufHeader(path: string): Promise<GgufParsed | null> {
   let f: Deno.FsFile;
@@ -122,33 +126,51 @@ function readValue(
     case 12: // float64
       if (off + 8 > n) return;
       return { v: view.getFloat64(off, true), next: off + 8 };
+    case 9: { // array: u32 inner_type + u64 count + count × element-of-inner-type
+      if (off + 12 > n) return;
+      const innerType = view.getUint32(off, true);
+      const count = Number(view.getBigUint64(off + 4, true));
+      let p = off + 12;
+      for (let i = 0; i < count; i++) {
+        if (p >= n) return;
+        const inner = readValue(view, buf, p, n, innerType);
+        if (inner === undefined) return;
+        p = inner.next;
+      }
+      // We don't surface array values to the caller (Phase 2 has no consumer
+      // for them); just advance past them so subsequent KVs are reachable.
+      return { v: undefined, next: p };
+    }
     default:
-      // Arrays (type 9) and others: skip the rest of this KV by giving up.
+      // Unknown types: skip the rest of this KV by giving up.
       return;
   }
 }
 
 export async function scan(dir: string, loadedFilename: string | null): Promise<ModelInfo[]> {
   const out: ModelInfo[] = [];
-  let entries: AsyncIterable<Deno.DirEntry>;
-  try { entries = Deno.readDir(dir); }
-  catch { return out; }
-  for await (const e of entries) {
-    if (!e.isFile || !e.name.endsWith(".gguf")) continue;
-    const full = `${dir}/${e.name}`;
-    let stat: Deno.FileInfo;
-    try { stat = await Deno.stat(full); }
-    catch { continue; }
-    let parsed: GgufParsed | null = null;
-    try { parsed = await parseGgufHeader(full); }
-    catch { /* leave null */ }
-    out.push({
-      filename: e.name,
-      size_bytes: stat.size,
-      modified_at: stat.mtime?.toISOString() ?? new Date(0).toISOString(),
-      parsed,
-      is_loaded: e.name === loadedFilename,
-    });
+  try {
+    for await (const e of Deno.readDir(dir)) {
+      if (!e.isFile || !e.name.endsWith(".gguf")) continue;
+      const full = `${dir}/${e.name}`;
+      let stat: Deno.FileInfo;
+      try { stat = await Deno.stat(full); }
+      catch { continue; }
+      let parsed: GgufParsed | null = null;
+      try { parsed = await parseGgufHeader(full); }
+      catch { /* leave null */ }
+      out.push({
+        filename: e.name,
+        size_bytes: stat.size,
+        modified_at: stat.mtime?.toISOString() ?? new Date(0).toISOString(),
+        parsed,
+        is_loaded: e.name === loadedFilename,
+      });
+    }
+  } catch {
+    // Directory missing / unreadable / permission denied — return whatever
+    // entries we already collected (typically an empty list).
+    return out;
   }
   out.sort((a, b) => a.filename.localeCompare(b.filename));
   return out;
