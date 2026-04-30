@@ -87,7 +87,9 @@ function openAiSseToChunks(source: ReadableStream<Uint8Array>): ReadableStream<C
             controller.close();
             return;
           }
-          buf += dec.decode(value, { stream: true });
+          buf += dec.decode(value, { stream: true })
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n");
 
           // SSE frames are separated by blank lines (`\n\n`).
           let sep: number;
@@ -96,6 +98,8 @@ function openAiSseToChunks(source: ReadableStream<Uint8Array>): ReadableStream<C
             buf = buf.slice(sep + 2);
             // Each frame may have multiple `data:` lines; concat them per spec.
             const dataLines = frame.split("\n").filter((l) => l.startsWith("data:"));
+            // SSE comment / keep-alive frames (e.g. `: ping\n\n`) have no
+            // `data:` line and fall through here harmlessly.
             if (dataLines.length === 0) continue;
             const payload = dataLines.map((l) => l.slice(5).trim()).join("\n");
             if (payload === "[DONE]") {

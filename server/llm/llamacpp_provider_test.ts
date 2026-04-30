@@ -116,6 +116,134 @@ initRuntime(tmp);
   assert(label === "(llamacpp; manager unreachable in Phase 1)", `label fallback: "${label}"`);
 }
 
+// Case 5: llama-server returns 4xx/5xx → adapter throws with status code in the message
+{
+  mockFetch((url) => {
+    if (String(url) === "http://lc:8080/v1/chat/completions") {
+      return new Response("model not loaded", { status: 503 });
+    }
+    throw new Error("unexpected url " + url);
+  });
+  let caught: Error | null = null;
+  try {
+    await llamacppProvider.chatNonStream([{ role: "user", content: "hi" }], {});
+  } catch (e) {
+    caught = e as Error;
+  }
+  assert(caught !== null, "chatNonStream throws on 503");
+  assert(caught!.message.includes("503"), `error message includes status (got: ${caught!.message})`);
+  assert(caught!.message.includes("model not loaded"), "error message includes upstream body");
+  restoreFetch();
+}
+
+// Case 6: malformed mid-stream JSON in an SSE frame is silently skipped, valid frames still delivered
+{
+  const sse = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "A" }, finish_reason: null }] })}`,
+    "",
+    "data: {this-is-not-json",                           // garbled mid-stream frame
+    "",
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "B" }, finish_reason: null }] })}`,
+    "",
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\n");
+
+  mockFetch((url) => {
+    if (String(url) === "http://lc:8080/v1/chat/completions") {
+      return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }
+    throw new Error("unexpected url " + url);
+  });
+
+  const stream = await llamacppProvider.chatStream(
+    [{ role: "user", content: "hi" }],
+    {},
+  );
+  const reader = stream.getReader();
+  const collected: ChatChunk[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    collected.push(value!);
+  }
+  assert(collected.length === 3, `3 chunks (garbled frame skipped); got ${collected.length}`);
+  assert(collected[0].content === "A", "first valid chunk delivered");
+  assert(collected[1].content === "B", "second valid chunk delivered (after garbled frame)");
+  assert(collected[2].done && collected[2].finish_reason === "stop", "terminal chunk reached despite garbled frame");
+  restoreFetch();
+}
+
+// Case 7: stream containing only role-only deltas (no content) → zero ChatChunks emitted, terminator still respected
+{
+  const sse = [
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" }, finish_reason: null }] })}`,
+    "",
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: null }] })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\n");
+
+  mockFetch((url) => {
+    if (String(url) === "http://lc:8080/v1/chat/completions") {
+      return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }
+    throw new Error("unexpected url " + url);
+  });
+
+  const stream = await llamacppProvider.chatStream(
+    [{ role: "user", content: "hi" }],
+    {},
+  );
+  const reader = stream.getReader();
+  const collected: ChatChunk[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    collected.push(value!);
+  }
+  assert(collected.length === 0, `role-only stream emits 0 chunks (got ${collected.length})`);
+  restoreFetch();
+}
+
+// Case 8: SSE with CRLF line terminators (as some reverse proxies normalize) → parsed correctly
+{
+  const sse = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "Hi" }, finish_reason: null }] })}`,
+    "",
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\r\n");   // CRLF, not LF
+
+  mockFetch((url) => {
+    if (String(url) === "http://lc:8080/v1/chat/completions") {
+      return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }
+    throw new Error("unexpected url " + url);
+  });
+
+  const stream = await llamacppProvider.chatStream(
+    [{ role: "user", content: "hi" }],
+    {},
+  );
+  const reader = stream.getReader();
+  const collected: ChatChunk[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    collected.push(value!);
+  }
+  assert(collected.length === 2, `CRLF stream parses as 2 chunks (content + finish); got ${collected.length}`);
+  assert(collected[0].content === "Hi", "CRLF: first chunk content correct");
+  assert(collected[1].done && collected[1].finish_reason === "stop", "CRLF: terminal chunk parsed");
+  restoreFetch();
+}
+
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
 console.log("\nAll llamacpp_provider tests passed.");
