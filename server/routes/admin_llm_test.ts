@@ -14,7 +14,14 @@ const tmp = await Deno.makeTempFile({ suffix: ".yaml" });
 await Deno.writeTextFile(tmp, "ollama:\n  url: http://localhost:11434\n  model: gemma3:4b\n");
 initRuntime(tmp);
 
+// Inject a global-admin auth context for the test app — production routes are
+// gated by requireGlobalAdmin(c), but the test harness has no bearerAuthMulti
+// in front of it, so we synthesize the same `c.get("auth")` value here.
 const app = new Hono();
+app.use("*", async (c, next) => {
+  c.set("auth", { username: "test-admin", global_admin: true, domains: {} });
+  await next();
+});
 app.route("/admin/llm", adminLlmRoutes());
 
 // Case 1: GET /admin/llm/capabilities returns the Ollama caps
@@ -56,6 +63,75 @@ globalThis.fetch = ((input: string | URL | Request) => {
   const j = await r.json() as { provider: string; model: string };
   assert(j.provider === "llamacpp", "active.provider=llamacpp");
   assert(j.model === "qwen.gguf", `active.model=qwen.gguf (got ${j.model})`);
+}
+
+// Case 4: POST /admin/llm/load forwards to provider.loadModel (llamacpp)
+{
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url === "http://lc:8081/v1/load") {
+      const body = JSON.parse(init?.body as string);
+      assert(body.filename === "qwen.gguf", "filename forwarded to manager");
+      assert(body.ctx_size === 8192, "ctx_size forwarded");
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/load", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: "qwen.gguf", ctx_size: 8192 }),
+  });
+  assert(r.status === 200, `load 200 (got ${r.status})`);
+}
+
+// Case 5: POST /admin/llm/unload forwards to provider.unloadModel
+{
+  let unloadCalled = false;
+  globalThis.fetch = ((input: string | URL | Request) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url === "http://lc:8081/v1/unload") {
+      unloadCalled = true;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/unload", { method: "POST" });
+  assert(r.status === 200, `unload 200 (got ${r.status})`);
+  assert(unloadCalled, "unload reached the manager");
+}
+
+// Case 6: POST /admin/llm/restart against llamacpp hits manager /v1/restart
+{
+  let restartBody: Record<string, unknown> | null = null;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url === "http://lc:8081/v1/restart") {
+      restartBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ctx_size: 4096 }),
+  });
+  assert(r.status === 200, `restart 200 (got ${r.status})`);
+  const rb = restartBody as Record<string, unknown> | null;
+  assert(rb?.ctx_size === 4096, "restart override forwarded");
+}
+
+// Case 7: POST /admin/llm/load against Ollama returns 501
+{
+  await Deno.writeTextFile(tmp, "ollama:\n  url: http://localhost:11434\n  model: gemma3:4b\n");
+  initRuntime(tmp);
+  const r = await app.request("/admin/llm/load", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: "any" }),
+  });
+  assert(r.status === 501, `Ollama load → 501 (got ${r.status})`);
 }
 
 globalThis.fetch = realFetch;
