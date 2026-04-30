@@ -289,6 +289,9 @@ function switchTab(name) {
   }
   window.location.hash = name;
   if (LOADERS[name]) LOADERS[name]();
+  // LLM badge stays fresh as the operator navigates — model can change between
+  // tabs (especially when they hit Load on the LLMs tab).
+  if (name === 'llms' || name === 'config') refreshLlmBadge();
 }
 
 document.querySelectorAll('#nav a').forEach(a => {
@@ -296,6 +299,21 @@ document.querySelectorAll('#nav a').forEach(a => {
 });
 
 window.addEventListener('hashchange', () => switchTab(window.location.hash.slice(1)));
+
+// ──────────────────────────────────────────────────────────────
+// LLM provider badge in the header
+// ──────────────────────────────────────────────────────────────
+async function refreshLlmBadge() {
+  try {
+    const j = await api('/admin/llm/active');
+    const badge = document.getElementById('llm-badge');
+    document.getElementById('llm-badge-provider').textContent = j.provider || '?';
+    document.getElementById('llm-badge-model').textContent = j.model ? `(${j.model})` : '';
+    badge.style.display = '';
+  } catch { /* leave badge hidden — common case when /admin/llm/active errors during sign-in */ }
+}
+
+document.getElementById('llm-badge').addEventListener('click', () => switchTab('config'));
 
 // ──────────────────────────────────────────────────────────────
 // OVERVIEW
@@ -2597,6 +2615,10 @@ async function init() {
       if (link) link.style.display = 'none';
     }
   }
+
+  // Populate the LLM provider badge once on sign-in. switchTab() refreshes it
+  // when the operator navigates to LLMs or Config (where the model may change).
+  refreshLlmBadge();
 
   // Show the Chat link iff the server reports chat_enabled. The link points
   // to /auth/openwebui-handoff (full-window navigation, not an iframe), which
