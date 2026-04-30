@@ -1,10 +1,18 @@
-// Bearer-token middleware for the manager. Constant-time compare.
+// Bearer-token middleware for the manager. Constant-time compare via
+// timingSafeEqual.
 //
-// The manager's token is read from OB2_LLAMACPP_MANAGER_TOKEN at process start
-// and cached. If the env is unset, all auth-required endpoints return 503 so
-// the operator gets a clear failure rather than a "default unauthenticated"
-// surprise. /healthz is exempted at the route level (don't call this middleware
-// on it).
+// The token is read from OB2_LLAMACPP_MANAGER_TOKEN on EVERY request (not
+// cached), so operators can rotate the token by setting a new env value
+// without restarting the process. If the env var is unset or empty, the
+// middleware fails closed with a 503 — there is no "auth disabled in dev"
+// fallback.
+//
+// `/healthz` is unauthenticated, but this middleware itself is unconditional:
+// the exemption is achieved in main.ts by mounting bearerAuth() on `/v1/*`
+// only, so `/healthz` (outside that prefix) is never wrapped. If you add a
+// new route OUTSIDE `/v1/*`, you are responsible for either (a) adding
+// `bearerAuth()` to its handler explicitly, or (b) deciding it should be
+// public.
 
 import type { Context, MiddlewareHandler } from "hono";
 
