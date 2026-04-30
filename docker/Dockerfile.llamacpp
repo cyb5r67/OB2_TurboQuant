@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.6
+#
+# ob2-llamacpp container: builds llama.cpp from source (CUDA 12.4) and the
+# Deno-based ob2-llamacpp-manager, then assembles a runtime image.
+#
+# Bumps to LLAMA_CPP_REF: see docs/llamacpp-version-bump.md.
+
+# ─── Stage 1: build llama.cpp (with CUDA) ─────────────────────────────────────
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS llama-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ca-certificates curl libcurl4-openssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG LLAMA_CPP_REF=b4404
+RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} https://github.com/ggerganov/llama.cpp /src
+WORKDIR /src
+RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build build --config Release -j --target llama-server
+
+# ─── Stage 2: compile the Deno manager into a static binary ───────────────────
+FROM denoland/deno:2.1.4 AS manager-build
+WORKDIR /m
+COPY llamacpp-manager/ ./
+RUN deno cache main.ts \
+ && deno compile \
+    --allow-net --allow-read --allow-write --allow-env --allow-run \
+    --output /out/ob2-llamacpp-manager main.ts
+
+# ─── Stage 3: minimal runtime ─────────────────────────────────────────────────
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libcurl4 tini curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=llama-build   /src/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=manager-build /out/ob2-llamacpp-manager   /usr/local/bin/ob2-llamacpp-manager
+
+ENV OB2_LLAMACPP_MODELS_DIR=/data/llamacpp/models \
+    OB2_LLAMACPP_CHAT_PORT=8080 \
+    OB2_LLAMACPP_MANAGER_PORT=8081 \
+    OB2_LLAMA_SERVER_BIN=/usr/local/bin/llama-server
+
+EXPOSE 8080 8081
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s \
+  CMD curl -fsS http://127.0.0.1:8081/healthz || exit 1
+
+ENTRYPOINT ["tini","--","/usr/local/bin/ob2-llamacpp-manager"]
