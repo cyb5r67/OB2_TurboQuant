@@ -132,8 +132,15 @@ app.post("/v1/load", async (c) => {
 });
 
 app.post("/v1/unload", async (c) => {
-  if (supervisor.getState().running) await supervisor.kill();
-  await clearLoaded(modelsDir);
+  // Same mutex as /v1/load and /v1/restart so a concurrent load doesn't see
+  // its child killed underneath it (which would surface as a confusing
+  // spawn_failed instead of a clean "unloaded mid-load").
+  const op = loadMutex.then(async () => {
+    if (supervisor.getState().running) await supervisor.kill();
+    await clearLoaded(modelsDir);
+  });
+  loadMutex = op.catch(() => {});
+  await op;
   return c.json({ ok: true });
 });
 

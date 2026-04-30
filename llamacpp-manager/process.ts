@@ -81,13 +81,18 @@ export class LlamaSupervisor {
   }
 
   private async _captureStderr() {
-    if (!this.child) return;
-    const reader = this.child.stderr.getReader();
+    // Capture the child reference at the top — if a subsequent spawn replaces
+    // this.child, we bail out so stderr from the dying generation doesn't leak
+    // into the new generation's ring buffer.
+    const child = this.child;
+    if (!child) return;
+    const reader = child.stderr.getReader();
     const dec = new TextDecoder();
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (this.child !== child) break;   // generation changed — stop appending
         this.stderrBuf += dec.decode(value, { stream: true });
         if (this.stderrBuf.length > STDERR_RING_BYTES) {
           this.stderrBuf = this.stderrBuf.slice(-STDERR_RING_BYTES);
@@ -97,19 +102,33 @@ export class LlamaSupervisor {
   }
 
   private async _watchExit() {
-    if (!this.child) return;
+    const child = this.child;
+    if (!child) return;
     try {
-      await this.child.status;
+      await child.status;
     } catch { /* ignore */ }
-    // Any exit (success or crash) → mark unloaded. Manager surfaces this via /healthz.
-    this.state = { running: false };
-    this.child = null;
+    // Only clear state if no subsequent spawn has replaced this generation.
+    // Without this guard, a delayed exit-watcher for a killed child could
+    // clobber state belonging to a newly-spawned successor.
+    if (this.child === child) {
+      this.state = { running: false };
+      this.child = null;
+    }
   }
 
   async awaitHealth(timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     const url = `http://127.0.0.1:${this.cfg.chatPort}/health`;
     while (Date.now() < deadline) {
+      // Fast-fail if the child died before becoming healthy. Without this,
+      // a malformed GGUF / OOM / missing CUDA driver causes a 60-second
+      // /v1/load hang because we keep polling a port nothing is listening on.
+      // _watchExit clears this.child on any exit; we surface stderr_tail.
+      if (!this.child) {
+        throw new Error(
+          `llama-server exited before becoming healthy — last 4KB stderr:\n${this.stderrBuf.slice(-1024)}`,
+        );
+      }
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(1000) });
         if (r.ok) {

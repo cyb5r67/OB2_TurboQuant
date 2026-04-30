@@ -72,5 +72,30 @@ const supervisor = new LlamaSupervisor({
   await bad.kill();
 }
 
+// Case 6: awaitHealth fast-fails when the child exits before becoming healthy
+// (proves the fix for the 60-second-hang-on-bad-GGUF issue).
+{
+  // Use /bin/false — exits immediately with code 1, never serves /health.
+  const fast = new LlamaSupervisor({
+    binary: "/bin/false",
+    preArgs: [],
+    modelsDir: "/tmp",
+    chatPort: 18297,
+  });
+  await fast.spawn({ filename: "fake.gguf", ctx_size: 4096, gpu_layers: -1, parallel_slots: 1 });
+  // Give _watchExit a moment to observe the immediate exit.
+  await new Promise((r) => setTimeout(r, 200));
+  const t0 = Date.now();
+  let threw = false;
+  let msg = "";
+  try { await fast.awaitHealth(60_000); }
+  catch (e) { threw = true; msg = (e as Error).message; }
+  const elapsed = Date.now() - t0;
+  assert(threw, "awaitHealth throws when child has exited");
+  assert(elapsed < 5_000, `fast-fail in <5s (got ${elapsed}ms — was the 60s hang fixed?)`);
+  assert(msg.includes("exited before becoming healthy") || msg.includes("failed to become healthy"),
+    `error message describes exit-before-health (got: ${msg.slice(0, 100)})`);
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll process tests passed.");
