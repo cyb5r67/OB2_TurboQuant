@@ -10,11 +10,13 @@
 
 import { Hono } from "hono";
 import { bearerAuth } from "./auth.ts";
+import { scan } from "./models.ts";
 
 const VERSION = "0.1.0-phase2";
 const STARTED_AT = Date.now();
 
 const managerPort = Number(Deno.env.get("OB2_LLAMACPP_MANAGER_PORT") || "8081");
+const modelsDir = Deno.env.get("OB2_LLAMACPP_MODELS_DIR") || "/data/llamacpp/models";
 
 const app = new Hono();
 
@@ -31,6 +33,13 @@ app.get("/healthz", (c) =>
 app.use("/v1/*", bearerAuth());
 
 // Routes added in Tasks 2, 4, 5–8 register themselves here.
+
+app.get("/v1/models", async (c) => {
+  // loadedFilename comes from state (Task 3); for this task it's always null.
+  const loadedFilename: string | null = null;
+  const models = await scan(modelsDir, loadedFilename);
+  return c.json({ models, loaded: null });
+});
 
 console.log(`ob2-llamacpp-manager v${VERSION} listening on :${managerPort}`);
 Deno.serve({ port: managerPort }, app.fetch);
