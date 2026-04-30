@@ -175,3 +175,118 @@ export async function scan(dir: string, loadedFilename: string | null): Promise<
   out.sort((a, b) => a.filename.localeCompare(b.filename));
   return out;
 }
+
+// SSRF denylist: private RFC1918 ranges + loopback + cloud metadata IPs.
+// Mirrors server/import/url_fetcher.ts's logic.
+//
+// The OB2_LLAMACPP_ALLOW_LOCAL_PULL env var, when set to "1", bypasses the
+// denylist for 127.0.0.1 (used in tests). Production deployments must NOT
+// set this — the manager runs in a container reachable from inside the Docker
+// network, and an attacker on that network could otherwise pull from cloud
+// metadata services.
+
+const PRIVATE_CIDRS: [number, number, number][] = [
+  // [base IP first octet, mask, base second octet]
+  [127, 8, 0],   // 127/8 loopback
+  [10,  8, 0],   // 10/8 RFC1918
+  [192, 16, 168], // 192.168/16
+  [169, 16, 254], // 169.254/16 link-local + AWS metadata 169.254.169.254
+];
+
+export function isDeniedIp(ip: string): boolean {
+  if (Deno.env.get("OB2_LLAMACPP_ALLOW_LOCAL_PULL") === "1" && ip === "127.0.0.1") return false;
+  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const oct = m.slice(1).map(Number);
+  for (const [base, maskBits, secondOctet] of PRIVATE_CIDRS) {
+    if (maskBits === 8 && oct[0] === base) return true;
+    if (maskBits === 16 && oct[0] === base && oct[1] === secondOctet) return true;
+  }
+  // 172.16-31.0.0/12
+  if (oct[0] === 172 && oct[1] >= 16 && oct[1] <= 31) return true;
+  return false;
+}
+
+const MAX_PULL_BYTES = 50 * 1024 * 1024 * 1024; // 50 GB
+
+export interface PullProgress {
+  status: string;
+  total?: number;
+  completed?: number;
+}
+
+async function resolveAndCheck(url: string): Promise<void> {
+  const u = new URL(url);
+  if (u.protocol !== "https:" && u.protocol !== "http:") {
+    throw new Error(`pull rejected: only http(s) URLs allowed, got ${u.protocol}`);
+  }
+  const host = u.hostname;
+  // Numeric IPs: refuse upfront if denylisted.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    if (isDeniedIp(host)) throw new Error(`pull rejected: ${host} is in denylist`);
+    return;
+  }
+  // Hostname: resolve A records and reject if any are denylisted.
+  let addrs: Deno.NetAddr[];
+  try { addrs = (await Deno.resolveDns(host, "A")) as unknown as Deno.NetAddr[]; }
+  catch (e) { throw new Error(`pull rejected: failed to resolve ${host}: ${(e as Error).message}`); }
+  for (const a of addrs as unknown as string[]) {
+    if (isDeniedIp(a)) throw new Error(`pull rejected: ${host} resolves to denylisted ${a}`);
+  }
+}
+
+export async function pullFromUrl(
+  url: string,
+  modelsDir: string,
+  outFilename: string,
+  onProgress: (p: PullProgress) => void,
+  extraHeaders: Record<string, string> = {},
+): Promise<void> {
+  if (!isSafeFilename(outFilename)) {
+    throw new Error(`pull rejected: unsafe filename "${outFilename}"`);
+  }
+  await resolveAndCheck(url);
+  onProgress({ status: "starting" });
+
+  const partial = `${modelsDir}/${outFilename}.partial`;
+  const final = `${modelsDir}/${outFilename}`;
+
+  const r = await fetch(url, { headers: extraHeaders });
+  if (!r.ok || !r.body) {
+    throw new Error(`pull failed: HTTP ${r.status}`);
+  }
+  const total = Number(r.headers.get("content-length") || "0") || undefined;
+  if (total && total > MAX_PULL_BYTES) {
+    throw new Error(`pull rejected: file size ${total} exceeds 50 GB cap`);
+  }
+  onProgress({ status: "downloading", total, completed: 0 });
+
+  let written = 0;
+  const out = await Deno.open(partial, { create: true, write: true, truncate: true });
+  try {
+    const reader = r.body.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      written += value.length;
+      if (written > MAX_PULL_BYTES) {
+        throw new Error(`pull aborted: stream exceeded 50 GB cap`);
+      }
+      await out.write(value);
+      onProgress({ status: "downloading", total, completed: written });
+    }
+  } finally {
+    out.close();
+  }
+  await Deno.rename(partial, final);
+  onProgress({ status: "success", total, completed: written });
+}
+
+function isSafeFilename(name: string): boolean {
+  return name.length > 0
+    && name.length <= 256
+    && !name.includes("/")
+    && !name.includes("\\")
+    && !name.includes("..")
+    && name.endsWith(".gguf");
+}

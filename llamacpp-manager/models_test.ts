@@ -111,5 +111,63 @@ const FIXTURE = `${REPO_ROOT}tests/fixtures/sample.gguf`;
   await Deno.remove(dir, { recursive: true });
 }
 
+import { pullFromUrl, isDeniedIp } from "./models.ts";
+
+// Case 7: isDeniedIp recognizes private/metadata IPs
+{
+  assert(isDeniedIp("127.0.0.1"), "127.0.0.1 denied");
+  assert(isDeniedIp("10.0.0.1"), "10.0.0.1 denied");
+  assert(isDeniedIp("169.254.169.254"), "AWS metadata denied");
+  assert(isDeniedIp("192.168.1.1"), "192.168/16 denied");
+  assert(!isDeniedIp("8.8.8.8"), "8.8.8.8 allowed");
+}
+
+// Case 8: pullFromUrl streams to disk with progress
+{
+  Deno.env.set("OB2_LLAMACPP_ALLOW_LOCAL_PULL", "1");
+  const dir = await Deno.makeTempDir();
+  const body = new Uint8Array(1024 * 100); // 100 KB
+  for (let i = 0; i < body.length; i++) body[i] = i & 0xff;
+
+  // Spin up a tiny HTTP server serving the body.
+  const ac = new AbortController();
+  const port = 18380;
+  const serverFinished = Deno.serve({
+    port,
+    signal: ac.signal,
+    onListen: () => {},
+  }, () => new Response(body, {
+    status: 200,
+    headers: { "Content-Length": String(body.length) },
+  })).finished;
+
+  await new Promise((r) => setTimeout(r, 100));
+
+  const progress: { status: string; total?: number; completed?: number }[] = [];
+  await pullFromUrl(`http://127.0.0.1:${port}/test.gguf`, dir, "test.gguf", (p) => progress.push(p));
+  ac.abort();
+  await serverFinished.catch(() => {});
+
+  const stat = await Deno.stat(`${dir}/test.gguf`);
+  assert(stat.size === body.length, `downloaded size matches (got ${stat.size})`);
+  assert(progress.length >= 2, `at least 2 progress frames (got ${progress.length})`);
+  assert(progress[progress.length - 1].status === "success", "terminal status=success");
+  await Deno.remove(dir, { recursive: true });
+}
+
+// Case 9: pullFromUrl refuses 127.0.0.1 when not bypassed (defense)
+{
+  Deno.env.delete("OB2_LLAMACPP_ALLOW_LOCAL_PULL");
+  const dir = await Deno.makeTempDir();
+  let threw = false;
+  try {
+    await pullFromUrl("http://127.0.0.1:18399/x.gguf", dir, "x.gguf", () => {});
+  } catch (e) {
+    threw = (e as Error).message.includes("denylist");
+  }
+  assert(threw, "pull from 127.0.0.1 without bypass → denylist error");
+  await Deno.remove(dir, { recursive: true });
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll models tests passed.");
