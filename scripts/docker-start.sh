@@ -6,9 +6,10 @@
 #   - ob2-postgres: pgvector database    (port 5433)
 #   - ob2-pgadmin:  Database admin       (port 5051)
 #
-# Optional (--with-chat):
-#   - ob2-openwebui: Open WebUI chat surface, reached through ob2-server's
-#                    reverse proxy on port 7601.
+# Optional (--with-chat / --with-llamacpp):
+#   - ob2-openwebui:  Open WebUI chat surface, reached through ob2-server's
+#                     reverse proxy on port 7601.
+#   - ob2-llamacpp:   llama.cpp / turboquant_plus manager + llama-server.
 #
 # Usage:
 #   scripts/docker-start.sh                      # default services
@@ -31,12 +32,14 @@ COMPOSE="$PROJECT_DIR/docker/docker-compose.yml"
 ENV_FILE="$PROJECT_DIR/.env"
 
 WITH_CHAT=false
+WITH_LLAMACPP=false
 BUILD_FLAG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-chat) WITH_CHAT=true; shift ;;
+    --with-llamacpp) WITH_LLAMACPP=true; shift ;;
     --build) BUILD_FLAG="--build"; shift ;;
-    *) echo "Unknown arg: $1"; echo "Usage: $0 [--with-chat] [--build]"; exit 2 ;;
+    *) echo "Unknown arg: $1"; echo "Usage: $0 [--with-chat] [--with-llamacpp] [--build]"; exit 2 ;;
   esac
 done
 
@@ -45,9 +48,31 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+# Auto-generate the manager token if --with-llamacpp is set and the env doesn't already have one.
+if $WITH_LLAMACPP; then
+  if ! grep -q "^OB2_LLAMACPP_MANAGER_TOKEN=" "$ENV_FILE" || \
+     [ -z "$(grep "^OB2_LLAMACPP_MANAGER_TOKEN=" "$ENV_FILE" | cut -d= -f2-)" ]; then
+    TOKEN=$(openssl rand -hex 32)
+    sed -i.bak '/^OB2_LLAMACPP_MANAGER_TOKEN=/d' "$ENV_FILE"
+    echo "OB2_LLAMACPP_MANAGER_TOKEN=$TOKEN" >> "$ENV_FILE"
+    rm -f "$ENV_FILE.bak"
+    echo "Generated OB2_LLAMACPP_MANAGER_TOKEN in .env"
+  fi
+  # Set OB2_LLM_PROVIDER=llamacpp if not already set.
+  if ! grep -q "^OB2_LLM_PROVIDER=llamacpp" "$ENV_FILE"; then
+    sed -i.bak '/^OB2_LLM_PROVIDER=/d' "$ENV_FILE"
+    echo "OB2_LLM_PROVIDER=llamacpp" >> "$ENV_FILE"
+    rm -f "$ENV_FILE.bak"
+    echo "Set OB2_LLM_PROVIDER=llamacpp in .env"
+  fi
+fi
+
 COMPOSE_ARGS=(-f "$COMPOSE" --env-file "$ENV_FILE")
 if $WITH_CHAT; then
   COMPOSE_ARGS+=(--profile openwebui)
+fi
+if $WITH_LLAMACPP; then
+  COMPOSE_ARGS+=(--profile llamacpp)
 fi
 
 echo "Starting OB2 platform via Docker${WITH_CHAT:+ (with chat)}..."
@@ -84,10 +109,13 @@ for i in $(seq 1 60); do
     if $WITH_CHAT; then
       echo "  Chat:       http://localhost:7601  (or click Chat in the dashboard)"
     fi
+    if $WITH_LLAMACPP; then
+      echo "  llama.cpp:  internal — manager on ob2-llamacpp:8081, chat on ob2-llamacpp:8080"
+    fi
     echo "  pgAdmin:    http://localhost:5051"
     echo
     echo "  Logs:       docker compose -f docker/docker-compose.yml logs -f ob2-server"
-    echo "  Stop:       scripts/docker-stop.sh${WITH_CHAT:+ --with-chat}"
+    echo "  Stop:       scripts/docker-stop.sh${WITH_CHAT:+ --with-chat}${WITH_LLAMACPP:+ --with-llamacpp}"
     exit 0
   fi
   sleep 2
