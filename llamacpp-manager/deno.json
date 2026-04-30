@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run *_test.ts",
+    "compile": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-run --output ob2-llamacpp-manager main.ts"
+  },
+  "imports": {
+    "hono": "jsr:@hono/hono@^4.6.0"
+  }
+}
