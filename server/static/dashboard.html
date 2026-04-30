@@ -363,6 +363,49 @@
     <h2 style="margin-top:1.5rem">Env overrides (read-only)</h2>
     <div id="env-overrides-container"></div>
 
+    <h2 style="margin-top:1.5rem">LLM Provider</h2>
+    <div class="card">
+      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.75rem">
+        Active provider determines which backend serves chat completions. Switching takes effect on the next request.
+        For deeper config (e.g. <code>extra_args</code>), edit the YAML above directly.
+      </div>
+      <fieldset id="llm-provider-fieldset" style="border:none;padding:0;margin:0 0 1rem 0">
+        <label style="margin-right:1rem"><input type="radio" name="llm-provider" value="ollama"> Ollama</label>
+        <label><input type="radio" name="llm-provider" value="llamacpp"> llama-server</label>
+      </fieldset>
+
+      <fieldset id="llamacpp-settings" style="display:none;border:1px solid var(--border);padding:0.75rem;border-radius:4px">
+        <legend style="font-size:0.9rem;padding:0 0.5rem">llama-server settings</legend>
+        <div style="display:grid;grid-template-columns:max-content 1fr;gap:0.5rem 0.75rem;align-items:center">
+          <label for="lc-manager-url">Manager URL</label>
+          <input id="lc-manager-url" type="text" placeholder="http://ob2-llamacpp:8081" style="width:100%">
+
+          <label for="lc-chat-url">Chat URL</label>
+          <input id="lc-chat-url" type="text" placeholder="http://ob2-llamacpp:8080" style="width:100%">
+
+          <label for="lc-models-dir">Models dir</label>
+          <input id="lc-models-dir" type="text" readonly style="width:100%;color:var(--muted)">
+
+          <label for="lc-default-model">Default model</label>
+          <input id="lc-default-model" type="text" placeholder="e.g. qwen2.5-7b-instruct.Q4_K_M.gguf" style="width:100%">
+
+          <label for="lc-ctx-size">Context size</label>
+          <input id="lc-ctx-size" type="number" min="512" style="width:100%">
+
+          <label for="lc-gpu-layers">GPU layers (-1 = all)</label>
+          <input id="lc-gpu-layers" type="number" min="-1" style="width:100%">
+
+          <label for="lc-parallel-slots">Parallel slots</label>
+          <input id="lc-parallel-slots" type="number" min="1" style="width:100%">
+        </div>
+
+        <div class="form-row" style="margin-top:0.75rem">
+          <button data-action="save-llamacpp-config">Save llama-server settings</button>
+          <span id="llamacpp-save-status" style="color:var(--muted);font-size:0.8rem"></span>
+        </div>
+      </fieldset>
+    </div>
+
     <h2 style="margin-top:1.5rem">Email (SMTP)</h2>
     <div class="card">
       <div id="smtp-status-indicator" style="margin-bottom:0.5rem;font-size:0.9rem"></div>

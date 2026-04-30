@@ -2013,6 +2013,7 @@ LOADERS.config = () => {
   loadConfig();
   loadSmtpStatus();
   loadMailConfig();
+  loadProviderSettings();
 };
 
 async function loadSmtpStatus() {
@@ -2132,6 +2133,109 @@ async function saveConfig() {
     loadConfig();
   } catch (e) { showError(e); }
 }
+
+// ──────────────────────────────────────────────────────────────
+// LLM provider settings (Config tab)
+// ──────────────────────────────────────────────────────────────
+//
+// PUT /admin/config replaces the entire file config (see writeRuntime in
+// server/runtime_config.ts), so we always read-modify-write the full file
+// section instead of sending a partial patch. Effective config (with
+// defaults filled in) drives the read side; file config is the merge base
+// for writes.
+async function loadProviderSettings() {
+  let cfg;
+  try { cfg = await api('/admin/config'); }
+  catch { return; }
+  const eff = cfg.effective || {};
+  const provider = eff.llm?.provider || 'ollama';
+  for (const radio of document.querySelectorAll('input[name="llm-provider"]')) {
+    radio.checked = radio.value === provider;
+  }
+  document.getElementById('llamacpp-settings').style.display = provider === 'llamacpp' ? '' : 'none';
+
+  const lc = eff.llamacpp || {};
+  document.getElementById('lc-manager-url').value = lc.manager_url || '';
+  document.getElementById('lc-chat-url').value = lc.chat_url || '';
+  document.getElementById('lc-models-dir').value = lc.models_dir || '';
+  document.getElementById('lc-default-model').value = lc.default_model || '';
+  document.getElementById('lc-ctx-size').value = lc.ctx_size ?? 8192;
+  document.getElementById('lc-gpu-layers').value = lc.gpu_layers ?? -1;
+  document.getElementById('lc-parallel-slots').value = lc.parallel_slots ?? 1;
+}
+
+// PUT a merged file config — fetch current `file`, overlay the patch sections,
+// then send as JSON. PUT /admin/config parses the body with js-yaml on the
+// server, and JSON is a strict subset of YAML so this round-trips cleanly.
+async function _putRuntimeConfigPatch(patch) {
+  const cfg = await api('/admin/config');
+  const next = { ...(cfg.file || {}) };
+  for (const [section, values] of Object.entries(patch)) {
+    next[section] = { ...(next[section] || {}), ...values };
+  }
+  const r = await fetch(`${BASE}/admin/config`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/x-yaml' },
+    body: JSON.stringify(next),
+  });
+  if (r.status === 401) {
+    WHOAMI = null;
+    showLogin('Session expired — please sign in again');
+    throw new Error('not authenticated');
+  }
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: r.statusText }));
+    throw new Error(e.error || r.statusText);
+  }
+  return await r.json();
+}
+
+// Provider radio change → patch llm.provider, refresh badge + panel.
+document.addEventListener('DOMContentLoaded', () => {
+  for (const radio of document.querySelectorAll('input[name="llm-provider"]')) {
+    radio.addEventListener('change', async () => {
+      const v = document.querySelector('input[name="llm-provider"]:checked').value;
+      document.getElementById('llamacpp-settings').style.display = v === 'llamacpp' ? '' : 'none';
+      try {
+        await _putRuntimeConfigPatch({ llm: { provider: v } });
+        refreshLlmBadge();
+        // Reload YAML editor so the operator sees the persisted change.
+        loadConfig();
+      } catch (e) {
+        alert('Failed to switch provider: ' + e.message);
+      }
+    });
+  }
+});
+
+// Save llama-server settings button.
+document.body.addEventListener('click', async (e) => {
+  if (e.target?.dataset?.action !== 'save-llamacpp-config') return;
+  const status = document.getElementById('llamacpp-save-status');
+  status.textContent = 'Saving…';
+  const patch = {
+    llamacpp: {
+      manager_url: document.getElementById('lc-manager-url').value,
+      chat_url: document.getElementById('lc-chat-url').value,
+      default_model: document.getElementById('lc-default-model').value,
+      ctx_size: Number(document.getElementById('lc-ctx-size').value),
+      gpu_layers: Number(document.getElementById('lc-gpu-layers').value),
+      parallel_slots: Number(document.getElementById('lc-parallel-slots').value),
+    },
+  };
+  try {
+    await _putRuntimeConfigPatch(patch);
+    status.textContent = 'Saved.';
+    refreshLlmBadge();
+    // Reload YAML editor + provider form so the operator sees persisted state.
+    loadConfig();
+    loadProviderSettings();
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  } catch (err) {
+    status.textContent = 'Save failed: ' + err.message;
+  }
+});
 
 // ──────────────────────────────────────────────────────────────
 // PROCESSES
