@@ -10,7 +10,7 @@
 
 import { Hono } from "hono";
 import { bearerAuth } from "./auth.ts";
-import { pullFromHf, pullFromUrl, type PullProgress, scan } from "./models.ts";
+import { deleteModel, pullFromHf, pullFromUrl, type PullProgress, scan } from "./models.ts";
 import { LlamaSupervisor } from "./process.ts";
 import { readLoaded, writeLoaded, clearLoaded } from "./state.ts";
 
@@ -270,6 +270,25 @@ app.post("/v1/pull", async (c) => {
       "Cache-Control": "no-cache",
     },
   });
+});
+
+app.delete("/v1/models/:filename", async (c) => {
+  const filename = c.req.param("filename");
+  if (!filename || !filename.endsWith(".gguf") || filename.includes("/") || filename.includes("..")) {
+    return c.json({ error: { type: "invalid_request_error", message: "invalid filename" } }, 400);
+  }
+  const state = supervisor.getState();
+  if (state.running && state.model === filename) {
+    return c.json({ error: { type: "in_use", message: "model is currently loaded — POST /v1/unload first" } }, 409);
+  }
+  try { await deleteModel(modelsDir, filename); }
+  catch (e) {
+    if ((e as Error).message.includes("No such")) {
+      return c.json({ error: { type: "not_found", message: `${filename} not found` } }, 404);
+    }
+    return c.json({ error: { type: "delete_failed", message: (e as Error).message } }, 500);
+  }
+  return c.json({ ok: true });
 });
 
 console.log(`ob2-llamacpp-manager v${VERSION} listening on :${managerPort}`);

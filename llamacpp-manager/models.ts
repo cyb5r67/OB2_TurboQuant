@@ -291,6 +291,13 @@ function isSafeFilename(name: string): boolean {
     && name.endsWith(".gguf");
 }
 
+export async function deleteModel(modelsDir: string, filename: string): Promise<void> {
+  if (!isSafeFilename(filename)) {
+    throw new Error(`delete rejected: unsafe filename "${filename}"`);
+  }
+  await Deno.remove(`${modelsDir}/${filename}`);
+}
+
 const HF_DEFAULT_BASE = "https://huggingface.co";
 
 export async function pullFromHf(

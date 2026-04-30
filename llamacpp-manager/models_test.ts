@@ -207,5 +207,29 @@ import { pullFromHf } from "./models.ts";
   await Deno.remove(dir, { recursive: true });
 }
 
+import { deleteModel } from "./models.ts";
+
+// Case 11: deleteModel removes the file
+{
+  const dir = await Deno.makeTempDir();
+  await Deno.copyFile(FIXTURE, `${dir}/del-me.gguf`);
+  await deleteModel(dir, "del-me.gguf");
+  let exists = true;
+  try { await Deno.stat(`${dir}/del-me.gguf`); }
+  catch { exists = false; }
+  assert(!exists, "deleteModel removes the file");
+  await Deno.remove(dir, { recursive: true });
+}
+
+// Case 12: deleteModel rejects path traversal
+{
+  const dir = await Deno.makeTempDir();
+  let threw = false;
+  try { await deleteModel(dir, "../etc/passwd"); }
+  catch { threw = true; }
+  assert(threw, "deleteModel rejects path traversal");
+  await Deno.remove(dir, { recursive: true });
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll models tests passed.");
