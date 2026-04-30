@@ -250,16 +250,16 @@ export const llamacppProvider: Provider = {
         const line = buf.slice(0, idx).trim();
         buf = buf.slice(idx + 1);
         if (!line) continue;
-        try {
-          const p = JSON.parse(line) as PullProgress;
-          if ((p as { status?: string }).status === "error") {
-            throw new Error((p as unknown as { message?: string }).message || "pull failed");
-          }
-          onProgress(p);
-        } catch (e) {
-          if ((e as Error).message.startsWith("pull failed") || (e as Error).message.includes("error")) throw e;
-          // Malformed line — skip.
+        let p: PullProgress;
+        try { p = JSON.parse(line) as PullProgress; }
+        catch { continue; /* malformed line — skip, don't fail the whole pull */ }
+        if ((p as { status?: string }).status === "error") {
+          // Manager surfaced a terminal error frame; propagate so the caller
+          // knows the pull failed even with a custom message that doesn't
+          // happen to contain the literal word "error".
+          throw new Error((p as unknown as { message?: string }).message || "pull failed");
         }
+        onProgress(p);
       }
     }
     // Invalidate active-model cache (the next chat may target the freshly pulled model).

@@ -348,6 +348,33 @@ initRuntime(tmp);
   restoreFetch();
 }
 
+// Case 16: pullModel propagates a manager-supplied error message that doesn't
+// happen to contain the literal word "error" (regression test for the
+// silent-swallow bug fixed alongside Task 10).
+{
+  const ndjson = [
+    '{"status":"starting"}',
+    '{"status":"downloading","total":1000,"completed":300}',
+    '{"status":"error","message":"file too large"}',
+  ].join("\n") + "\n";
+  mockFetch((url) => {
+    if (String(url) === "http://lc:8081/v1/pull") {
+      return new Response(ndjson, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
+    }
+    throw new Error("unexpected url " + url);
+  });
+  let caught: Error | null = null;
+  try {
+    await llamacppProvider.pullModel!(
+      { source: "url", url: "https://example.test/x.gguf" },
+      () => {},
+    );
+  } catch (e) { caught = e as Error; }
+  assert(caught !== null, "pullModel throws on terminal error frame");
+  assert(caught!.message === "file too large", `error message propagated (got: ${caught!.message})`);
+  restoreFetch();
+}
+
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
 console.log("\nAll llamacpp_provider tests passed.");
