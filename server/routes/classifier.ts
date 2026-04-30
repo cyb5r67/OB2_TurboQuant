@@ -14,6 +14,7 @@
 import type { Config } from "../config.ts";
 import type { Sidecar } from "../sidecar.ts";
 import { getRuntime } from "../runtime_config.ts";
+import { getClassifierProvider } from "../llm/provider.ts";
 
 interface SidecarDomainListResult {
   domains: string[];
@@ -88,22 +89,16 @@ DOMAIN: none | CONFIDENCE: high | REASON: <brief reason>
 User question: "${query}"`;
 
   try {
-    const model = rt.ollama.classifier_model || rt.ollama.model;
-    const resp = await fetch(`${rt.ollama.url}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: classifierPrompt }],
-        stream: false,
-        keep_alive: Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h",
-        options: { temperature: 0, num_predict: 60 },
-      }),
-    });
-    if (!resp.ok) return null;
-
-    const data = await resp.json() as { message: { content: string } };
-    const text = data.message.content.trim();
+    let text: string;
+    try {
+      const r = await getClassifierProvider().chatNonStream(
+        [{ role: "user", content: classifierPrompt }],
+        { temperature: 0, max_tokens: 60 },
+      );
+      text = r.content.trim();
+    } catch {
+      return null;
+    }
 
     // Parse: DOMAIN: xxx | CONFIDENCE: yyy | REASON: zzz
     const match = text.match(
