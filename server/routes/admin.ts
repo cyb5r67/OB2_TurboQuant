@@ -1079,6 +1079,21 @@ export function adminRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
   // LLM management — list, switch, pull, delete Ollama models
   // ─────────────────────────────────────────────────────────────
 
+  // Gate the existing Ollama-specific endpoints when the active provider
+  // isn't Ollama. Operators in llamacpp mode should use /admin/llm/* instead.
+  app.use("/ollama/*", async (c, next) => {
+    const provider = getRuntime().llm.provider;
+    if (provider !== "ollama") {
+      return c.json({
+        error: {
+          type: "wrong_provider",
+          message: `Active LLM provider is ${provider}; use /admin/llm/* instead, or set OB2_LLM_PROVIDER=ollama`,
+        },
+      }, 503);
+    }
+    await next();
+  });
+
   // GET /admin/ollama/models — list installed + active + env-pinned status
   app.get("/ollama/models", async (c) => {
     const denied = requireGlobalAdmin(c);
