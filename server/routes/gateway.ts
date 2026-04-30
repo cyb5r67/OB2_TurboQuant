@@ -18,17 +18,15 @@ import { bearerAuthMulti, type AuthContext, hasPermission } from "../users.ts";
 import { getRuntime } from "../runtime_config.ts";
 import { classifyQuery } from "./classifier.ts";
 import { signFileToken } from "../auth/file_signing.ts";
+import { getProvider } from "../llm/provider.ts";
+import type { ChatMessage } from "../llm/provider.ts";
+import { chatChunkStreamToOpenAiSSE } from "../llm/openai_sse.ts";
 
 type AppEnv = { Variables: { auth?: AuthContext } };
 
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
-
-interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-}
 
 interface ChatCompletionRequest {
   model: string;
@@ -225,178 +223,6 @@ async function augmentWithContext(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Ollama bridging
-// ─────────────────────────────────────────────────────────────
-
-interface OllamaChatChunk {
-  model: string;
-  created_at: string;
-  message?: { role: string; content: string };
-  done: boolean;
-  done_reason?: string;
-}
-
-function nowId(): string {
-  return `chatcmpl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
-// keep_alive = "24h" so Ollama keeps the model loaded in VRAM for 24 hours
-// after each request. Default is 5 minutes — any conversation pause longer
-// than that means the next message pays a 5–10 s VRAM-load penalty, which
-// users perceive as "the GPU is reloading the LLM every time."
-// Override per-deployment via OB2_OLLAMA_KEEP_ALIVE.
-const OLLAMA_KEEP_ALIVE = Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h";
-
-async function callOllamaStream(
-  config: Config,
-  messages: ChatMessage[],
-  req: ChatCompletionRequest,
-): Promise<ReadableStream<Uint8Array>> {
-  const body = {
-    model: getRuntime().ollama.model,
-    messages,
-    stream: true,
-    keep_alive: OLLAMA_KEEP_ALIVE,
-    options: {
-      ...(req.temperature !== undefined && { temperature: req.temperature }),
-      ...(req.top_p !== undefined && { top_p: req.top_p }),
-      ...(req.max_tokens !== undefined && { num_predict: req.max_tokens }),
-    },
-  };
-  const resp = await fetch(`${getRuntime().ollama.url}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok || !resp.body) {
-    const msg = await resp.text().catch(() => "");
-    throw new Error(`Ollama ${resp.status}: ${msg}`);
-  }
-  return resp.body;
-}
-
-/**
- * Transform Ollama's NDJSON stream into OpenAI chat-completion-chunk SSE.
- */
-function ollamaToOpenAiSSE(
-  modelId: string,
-  ollamaStream: ReadableStream<Uint8Array>,
-): ReadableStream<Uint8Array> {
-  const id = nowId();
-  const created = Math.floor(Date.now() / 1000);
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  return new ReadableStream({
-    async start(controller) {
-      const reader = ollamaStream.getReader();
-      let buf = "";
-      let firstChunk = true;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let idx: number;
-          while ((idx = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, idx).trim();
-            buf = buf.slice(idx + 1);
-            if (!line) continue;
-
-            let chunk: OllamaChatChunk;
-            try {
-              chunk = JSON.parse(line);
-            } catch {
-              continue;
-            }
-
-            // Emit role delta on first chunk
-            if (firstChunk) {
-              firstChunk = false;
-              const first = {
-                id, object: "chat.completion.chunk", created, model: modelId,
-                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
-              };
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(first)}\n\n`));
-            }
-
-            if (chunk.message?.content) {
-              const payload = {
-                id, object: "chat.completion.chunk", created, model: modelId,
-                choices: [{
-                  index: 0,
-                  delta: { content: chunk.message.content },
-                  finish_reason: null,
-                }],
-              };
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-            }
-
-            if (chunk.done) {
-              const finalChunk = {
-                id, object: "chat.completion.chunk", created, model: modelId,
-                choices: [{
-                  index: 0,
-                  delta: {},
-                  finish_reason: chunk.done_reason === "length" ? "length" : "stop",
-                }],
-              };
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(finalChunk)}\n\n`));
-              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-              break;
-            }
-          }
-        }
-      } catch (err) {
-        const errPayload = {
-          error: { message: (err as Error).message, type: "upstream_error" },
-        };
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(errPayload)}\n\n`));
-      } finally {
-        controller.close();
-      }
-    },
-  });
-}
-
-async function callOllamaNonStream(
-  config: Config,
-  messages: ChatMessage[],
-  req: ChatCompletionRequest,
-): Promise<{ content: string; eval_count?: number; prompt_eval_count?: number }> {
-  const body = {
-    model: getRuntime().ollama.model,
-    messages,
-    stream: false,
-    keep_alive: OLLAMA_KEEP_ALIVE,
-    options: {
-      ...(req.temperature !== undefined && { temperature: req.temperature }),
-      ...(req.top_p !== undefined && { top_p: req.top_p }),
-      ...(req.max_tokens !== undefined && { num_predict: req.max_tokens }),
-    },
-  };
-  const resp = await fetch(`${getRuntime().ollama.url}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => "");
-    throw new Error(`Ollama ${resp.status}: ${msg}`);
-  }
-  const j = await resp.json() as {
-    message: { content: string };
-    eval_count?: number;
-    prompt_eval_count?: number;
-  };
-  return {
-    content: j.message.content,
-    eval_count: j.eval_count,
-    prompt_eval_count: j.prompt_eval_count,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────
 
@@ -541,11 +367,15 @@ export function gatewayRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
       }
     }
 
-    // Forward to Ollama
+    // Forward to the active LLM provider.
     if (stream) {
       try {
-        const ollamaStream = await callOllamaStream(config, messagesForModel, req);
-        const openAiStream = ollamaToOpenAiSSE(modelId, ollamaStream);
+        const chunkStream = await getProvider().chatStream(messagesForModel, {
+          temperature: req.temperature,
+          top_p: req.top_p,
+          max_tokens: req.max_tokens,
+        });
+        const openAiStream = chatChunkStreamToOpenAiSSE(modelId, chunkStream);
         return new Response(openAiStream, {
           headers: {
             "Content-Type": "text/event-stream",
@@ -560,8 +390,12 @@ export function gatewayRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
       }
     } else {
       try {
-        const r = await callOllamaNonStream(config, messagesForModel, req);
-        const id = nowId();
+        const r = await getProvider().chatNonStream(messagesForModel, {
+          temperature: req.temperature,
+          top_p: req.top_p,
+          max_tokens: req.max_tokens,
+        });
+        const id = `chatcmpl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         const created = Math.floor(Date.now() / 1000);
         return c.json({
           id,
@@ -574,9 +408,9 @@ export function gatewayRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
             finish_reason: "stop",
           }],
           usage: {
-            prompt_tokens: r.prompt_eval_count ?? 0,
-            completion_tokens: r.eval_count ?? 0,
-            total_tokens: (r.prompt_eval_count ?? 0) + (r.eval_count ?? 0),
+            prompt_tokens: r.prompt_tokens,
+            completion_tokens: r.completion_tokens,
+            total_tokens: r.prompt_tokens + r.completion_tokens,
           },
         });
       } catch (err) {
