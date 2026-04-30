@@ -1251,11 +1251,13 @@ echo
 echo "── Step 22: Provider abstraction (llamacpp) ──"
 
 verify_llamacpp_provider() {
-  local fake_pid llama_server_pid resp
+  local fake_pid resp
   echo "  Stopping main OB2 server before swapping provider..."
   if [ -n "${SERVER_PID:-}" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
+    # Clear SERVER_PID so the EXIT trap doesn't try to double-kill an
+    # already-reaped process when we swap in the llamacpp-mode OB2 below.
     SERVER_PID=""
   fi
 
@@ -1279,6 +1281,9 @@ verify_llamacpp_provider() {
   fi
 
   echo "  Starting OB2 server with OB2_LLM_PROVIDER=llamacpp..."
+  # Clear any stale pidfile from a previously-interrupted run before launch,
+  # so we don't accidentally read an old PID on the line below.
+  rm -f /tmp/ob2-llamacpp.pid
   (
     cd "$SERVER_DIR"
     env $(grep -v '^#' "$ENV_FILE" | grep -v '^\s*$' | xargs) \
@@ -1289,7 +1294,9 @@ verify_llamacpp_provider() {
     echo $! >/tmp/ob2-llamacpp.pid
   )
   sleep 8
-  llama_server_pid=$(cat /tmp/ob2-llamacpp.pid 2>/dev/null || echo "")
+  # Hand the llamacpp-mode OB2's PID up to the script-level SERVER_PID so the
+  # EXIT trap will kill it if the user Ctrl-C's between here and teardown.
+  SERVER_PID=$(cat /tmp/ob2-llamacpp.pid 2>/dev/null || echo "")
 
   # Stream a chat request through the gateway.
   resp=$(curl -fsS -N -H "Authorization: Bearer $KEY" \
@@ -1299,13 +1306,19 @@ verify_llamacpp_provider() {
     "$BASE/v1/chat/completions" || true)
 
   # Tear down the llamacpp-mode server and the fake.
-  if [ -n "$llama_server_pid" ]; then
-    kill "$llama_server_pid" 2>/dev/null || true
-    wait "$llama_server_pid" 2>/dev/null || true
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
   fi
   kill "$fake_pid" 2>/dev/null || true
   wait "$fake_pid" 2>/dev/null || true
   rm -f /tmp/ob2-llamacpp.pid
+  # Clear SERVER_PID again now that we've manually killed/reaped the
+  # llamacpp-mode OB2 — prevents the EXIT trap from double-killing a dead PID.
+  # NOTE: Step 22 is terminal in the current test ordering. If a future Step 23
+  # is added, it MUST call start_server again to bring OB2 back up before
+  # exercising any /v1/* endpoints.
+  SERVER_PID=""
 
   TESTS=$((TESTS + 1))
   if echo "$resp" | grep -q '"content":"Hello"' && echo "$resp" | grep -q '\[DONE\]'; then
