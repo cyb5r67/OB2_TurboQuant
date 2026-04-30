@@ -61,17 +61,30 @@ export function chatChunkStreamToOpenAiSSE(
             };
             controller.enqueue(enc.encode(`data: ${JSON.stringify(finalFrame)}\n\n`));
             controller.enqueue(enc.encode("data: [DONE]\n\n"));
-            break;
+            return;
           }
         }
       } catch (err) {
         const errPayload = {
-          error: { message: (err as Error).message, type: "upstream_error" },
+          error: {
+            message: (err as Error).message,
+            type: "server_error",
+            code: null,
+            param: null,
+          },
         };
         controller.enqueue(enc.encode(`data: ${JSON.stringify(errPayload)}\n\n`));
+        controller.enqueue(enc.encode("data: [DONE]\n\n"));
       } finally {
-        controller.close();
+        try { reader.releaseLock(); } catch { /* already released */ }
+        try { controller.close(); } catch { /* already closed */ }
       }
+    },
+
+    async cancel(reason) {
+      // Downstream consumer (e.g., the HTTP client) disconnected. Propagate up
+      // so the upstream provider can abort generation and release any slot.
+      try { await source.cancel(reason); } catch { /* swallow — nothing to do */ }
     },
   });
 }

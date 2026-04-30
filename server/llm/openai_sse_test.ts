@@ -75,5 +75,26 @@ async function collect(stream: ReadableStream<Uint8Array>): Promise<string> {
   assert(sse.includes('"model":"test-model"'), "model id propagated");
 }
 
+// Case 4: upstream errors mid-stream — encoder emits an error frame and
+// terminates with [DONE] so OpenAI SDK clients exit their for-await loop cleanly.
+{
+  const errSource = new ReadableStream<ChatChunk>({
+    async start(c) {
+      c.enqueue({ content: "partial", done: false });
+      // Yield so the encoder's reader can pull the queued chunk before we
+      // error the stream — otherwise controller.error() supersedes the queue.
+      await new Promise((r) => setTimeout(r, 0));
+      c.error(new Error("boom"));
+    },
+  });
+  const sse = await collect(chatChunkStreamToOpenAiSSE("ob2", errSource));
+  assert(sse.includes('"server_error"'), "error frame uses OpenAI-spec server_error type");
+  assert(sse.includes('"message":"boom"'), "error message propagates from upstream");
+  assert(sse.endsWith("data: [DONE]\n\n"), "error stream terminates with [DONE]");
+  // The role-delta + content-delta for the partial chunk should appear before the error.
+  assert(sse.includes('"role":"assistant"'), "role-delta still emitted before error");
+  assert(sse.includes('"content":"partial"'), "partial content emitted before error");
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll openai_sse tests passed.");
