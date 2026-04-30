@@ -10,7 +10,7 @@
 #   docker compose -f docker/docker-compose.yml logs -f ob2-server
 #   docker compose -f docker/docker-compose.yml down
 
-name: ob2
+name: ob2_turboquant
 
 services:
   ob2-server:
@@ -219,7 +219,36 @@ services:
       retries: 5
       start_period: 60s
 
+  ob2-llamacpp:
+    profiles: ["llamacpp"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.llamacpp
+      args:
+        LLAMA_CPP_REF: "b4404"
+    container_name: ob2-llamacpp
+    environment:
+      OB2_LLAMACPP_MANAGER_TOKEN: ${OB2_LLAMACPP_MANAGER_TOKEN:?set OB2_LLAMACPP_MANAGER_TOKEN in .env}
+      OB2_HF_TOKEN: ${OB2_HF_TOKEN:-}
+      OB2_LLAMACPP_DEFAULT_MODEL: ${OB2_LLAMACPP_DEFAULT_MODEL:-}
+      OB2_LLAMACPP_CTX_SIZE: ${OB2_LLAMACPP_CTX_SIZE:-8192}
+      OB2_LLAMACPP_GPU_LAYERS: ${OB2_LLAMACPP_GPU_LAYERS:--1}
+      OB2_LLAMACPP_PARALLEL_SLOTS: ${OB2_LLAMACPP_PARALLEL_SLOTS:-1}
+    volumes:
+      - llamacpp_models:/data/llamacpp/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - default
+
 volumes:
-  ob2_data:
-  ob2_pgdata:
-  ob2_openwebui_data:
+  ob2_data:           { name: ob2_data }
+  ob2_pgdata:         { name: ob2_pgdata }
+  ob2_openwebui_data: { name: ob2_openwebui_data }
+  llamacpp_models:    { name: llamacpp_models }
