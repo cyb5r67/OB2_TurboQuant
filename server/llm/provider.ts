@@ -9,6 +9,10 @@
 // active provider from runtime config (hot-reloaded). Adapter modules
 // register themselves into module-scoped slots in this file.
 
+import { getRuntime } from "../runtime_config.ts";
+import { ollamaProvider } from "./ollama_provider.ts";
+import { llamacppProvider } from "./llamacpp_provider.ts";
+
 // ─────────────────────────────────────────────────────────────
 // Shared types
 // ─────────────────────────────────────────────────────────────
@@ -142,9 +146,11 @@ export class NotImplementedInPhase1 extends Error {
 // ─────────────────────────────────────────────────────────────
 
 export function getProvider(): Provider {
-  throw new Error("provider factory not wired — see Task 6");
+  return getRuntime().llm.provider === "llamacpp" ? llamacppProvider : ollamaProvider;
 }
 
 export function getClassifierProvider(): Provider {
-  throw new Error("classifier provider factory not wired — see Task 6");
+  const cp = getRuntime().llm.classifier_provider;
+  const id = cp === "" ? getRuntime().llm.provider : cp;
+  return id === "llamacpp" ? llamacppProvider : ollamaProvider;
 }
