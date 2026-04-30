@@ -138,6 +138,20 @@ export function adminLlmRoutes(): Hono<AppEnv> {
     });
   });
 
+  // GET /admin/llm/models — provider-aware list of installed models.
+  // For Ollama this returns Ollama's registry-installed models; for llamacpp
+  // it returns the GGUF files in the manager's models_dir.
+  app.get("/models", async (c) => {
+    const p = getProvider();
+    if (!p.listInstalled) return c.json({ models: [] });
+    try {
+      const models = await p.listInstalled();
+      return c.json({ models });
+    } catch (e) {
+      return c.json({ error: { type: "list_failed", message: (e as Error).message } }, 500);
+    }
+  });
+
   // POST /admin/llm/restart — llamacpp-only, hits manager /v1/restart with overrides.
   app.post("/restart", async (c) => {
     const denied = requireGlobalAdmin(c);

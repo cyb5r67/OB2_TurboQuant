@@ -255,48 +255,76 @@
   <!-- ========== LLM MANAGEMENT ========== -->
   <section id="tab-llms" class="tab">
     <h2>LLM Management
-      <span style="color:var(--muted); font-size:0.8rem; font-weight:400; margin-left:0.5rem">
-        powered by Ollama at <span id="llms-ollama-url" class="mono"></span>
-      </span>
+      <span id="llms-mode-label" style="color:var(--muted); font-size:0.8rem; font-weight:400; margin-left:0.5rem">…</span>
     </h2>
-    <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.75rem">
-      Switch the active chat model, pull new models from the Ollama registry,
-      and remove ones you no longer need. Changes apply immediately to every
-      chat surface (Open WebUI, MCP, the OpenAI-compatible gateway).
-    </div>
 
-    <div class="card" id="llms-active-card" style="margin-bottom:1rem">
-      <div style="font-size:0.85rem;color:var(--muted)">Active model</div>
-      <div id="llms-active-name" class="mono" style="font-size:1.1rem;margin:0.25rem 0">…</div>
-      <div id="llms-active-meta" style="font-size:0.85rem;color:var(--muted)"></div>
-      <div id="llms-env-pinned-warning" style="display:none;margin-top:0.5rem;padding:0.5rem;background:rgba(239,200,60,0.08);border-left:3px solid var(--yellow);font-size:0.85rem"></div>
-    </div>
-
-    <h2 style="margin-top:1rem">Switch active model</h2>
-    <div class="card">
-      <div style="display:flex;gap:0.5rem;align-items:center">
-        <select id="llms-switch-select" style="flex:1"></select>
-        <button data-action="apply-llm-switch">Apply</button>
+    <div id="llms-ollama-mode">
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.75rem">
+        Switch the active chat model, pull new models from the Ollama registry,
+        and remove ones you no longer need. Changes apply immediately to every
+        chat surface (Open WebUI, MCP, the OpenAI-compatible gateway).
       </div>
-      <div id="llms-switch-status" style="font-size:0.85rem;margin-top:0.4rem;min-height:1rem;color:var(--muted)"></div>
+
+      <div class="card" id="llms-active-card" style="margin-bottom:1rem">
+        <div style="font-size:0.85rem;color:var(--muted)">Active model</div>
+        <div id="llms-active-name" class="mono" style="font-size:1.1rem;margin:0.25rem 0">…</div>
+        <div id="llms-active-meta" style="font-size:0.85rem;color:var(--muted)"></div>
+        <div id="llms-env-pinned-warning" style="display:none;margin-top:0.5rem;padding:0.5rem;background:rgba(239,200,60,0.08);border-left:3px solid var(--yellow);font-size:0.85rem"></div>
+      </div>
+
+      <h2 style="margin-top:1rem">Switch active model</h2>
+      <div class="card">
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select id="llms-switch-select" style="flex:1"></select>
+          <button data-action="apply-llm-switch">Apply</button>
+        </div>
+        <div id="llms-switch-status" style="font-size:0.85rem;margin-top:0.4rem;min-height:1rem;color:var(--muted)"></div>
+      </div>
+
+      <h2 style="margin-top:1rem">Pull a new model</h2>
+      <div class="card">
+        <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.5rem">
+          Names follow Ollama conventions: <code>llama3.1:8b</code>,
+          <code>qwen2.5-coder:32b-instruct</code>, etc.
+          Browse <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library</a>.
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input id="llms-pull-input" type="text" placeholder="model:tag" style="flex:1" autocomplete="off">
+          <button data-action="start-llm-pull">Pull</button>
+        </div>
+        <div id="llms-pull-jobs" style="margin-top:0.75rem"></div>
+      </div>
+
+      <h2 style="margin-top:1rem">Installed models</h2>
+      <div id="llms-installed-container"></div>
     </div>
 
-    <h2 style="margin-top:1rem">Pull a new model</h2>
-    <div class="card">
-      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.5rem">
-        Names follow Ollama conventions: <code>llama3.1:8b</code>,
-        <code>qwen2.5-coder:32b-instruct</code>, etc.
-        Browse <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library</a>.
+    <div id="llms-llamacpp-mode" style="display:none">
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom: 0.75rem">
+        Manage llama.cpp / turboquant_plus models. Load and unload swap the running model;
+        pull from URL or HuggingFace adds new GGUFs to the models directory.
       </div>
-      <div style="display:flex;gap:0.5rem;align-items:center">
-        <input id="llms-pull-input" type="text" placeholder="model:tag" style="flex:1" autocomplete="off">
-        <button data-action="start-llm-pull">Pull</button>
-      </div>
-      <div id="llms-pull-jobs" style="margin-top:0.75rem"></div>
-    </div>
 
-    <h2 style="margin-top:1rem">Installed models</h2>
-    <div id="llms-installed-container"></div>
+      <div class="card" id="llamacpp-loaded-card" style="margin-bottom:1rem">
+        <div style="font-size:0.85rem;color:var(--muted)">Loaded model</div>
+        <div id="lc-loaded-model" class="mono" style="font-size:1.1rem;margin:0.25rem 0">…</div>
+        <div id="lc-loaded-meta" style="font-size:0.85rem;color:var(--muted)"></div>
+        <!-- Action buttons (load/unload/pull) come in Task 9 -->
+      </div>
+
+      <h2 style="margin-top:1rem">Available GGUFs</h2>
+      <table id="llamacpp-models-table">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Size</th>
+            <th>Quant</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ========== GRAPH ========== -->

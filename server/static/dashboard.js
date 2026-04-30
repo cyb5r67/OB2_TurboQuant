@@ -1391,13 +1391,77 @@ async function testPgvector() {
 let _llmPullPoller = null;
 
 LOADERS.llms = async () => {
-  await renderLlmTab();
+  let caps;
+  try { caps = await api('/admin/llm/capabilities'); }
+  catch { caps = { provider: 'ollama', capabilities: {} }; }
+
+  const provider = caps.provider || 'ollama';
+  const ollamaEl = document.getElementById('llms-ollama-mode');
+  const llamacppEl = document.getElementById('llms-llamacpp-mode');
+  if (ollamaEl) ollamaEl.style.display = provider === 'ollama' ? '' : 'none';
+  if (llamacppEl) llamacppEl.style.display = provider === 'llamacpp' ? '' : 'none';
+
+  // Mode label in the title
+  const modeLabel = document.getElementById('llms-mode-label');
+  if (modeLabel) {
+    modeLabel.textContent = provider === 'ollama'
+      ? 'powered by Ollama'
+      : 'powered by llama-server';
+  }
+
+  if (provider === 'ollama') {
+    await loadOllamaLlmsTab();
+  } else if (provider === 'llamacpp') {
+    await loadLlamacppPanel();
+  }
 };
+
+// Helper: the existing LOADERS.llms body, now only called in Ollama mode.
+async function loadOllamaLlmsTab() {
+  await renderLlmTab();
+}
+
+async function loadLlamacppPanel() {
+  // Loaded model
+  let active;
+  try { active = await api('/admin/llm/active'); }
+  catch { active = { model: '(error)' }; }
+  document.getElementById('lc-loaded-model').textContent = active.model || '(unknown)';
+
+  // GGUF list
+  let list;
+  try { list = await api('/admin/llm/models'); }
+  catch { list = { models: [] }; }
+
+  const tbody = document.querySelector('#llamacpp-models-table tbody');
+  tbody.innerHTML = '';
+  for (const m of (list.models || [])) {
+    const tr = document.createElement('tr');
+    const sizeMb = (m.size_bytes / (1024 * 1024)).toFixed(1);
+    const quant = m.details?.parsed?.quant || '?';
+    const isLoaded = m.details?.is_loaded || false;
+    tr.innerHTML = `
+      <td>${escapeHtml(m.name)}</td>
+      <td class="mono">${sizeMb} MB</td>
+      <td>${escapeHtml(quant)}</td>
+      <td>${isLoaded ? '<span class="badge badge-green">loaded</span>' : '<span class="badge badge-muted">available</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if ((list.models || []).length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No GGUF files found in the models directory.</td></tr>';
+  }
+}
 
 async function renderLlmTab() {
   try {
     const r = await api('/admin/ollama/models');
-    document.getElementById('llms-ollama-url').textContent = r.ollama_url || '';
+    const urlEl = document.getElementById('llms-ollama-url');
+    if (urlEl) urlEl.textContent = r.ollama_url || '';
+    const modeLabel = document.getElementById('llms-mode-label');
+    if (modeLabel && r.ollama_url) {
+      modeLabel.textContent = `powered by Ollama at ${r.ollama_url}`;
+    }
 
     // ── Active model card ──────────────────────────────────────
     document.getElementById('llms-active-name').textContent = r.active_model || '(none configured)';

@@ -174,6 +174,28 @@ globalThis.fetch = ((input: string | URL | Request) => {
   assert(r.status === 400, `mismatched source → 400 (got ${r.status})`);
 }
 
+// Case 10: GET /admin/llm/models lists installed models for the active provider
+{
+  // provider is still llamacpp from earlier cases
+  globalThis.fetch = ((input: string | URL | Request) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url === "http://lc:8081/v1/models") {
+      return Promise.resolve(new Response(JSON.stringify({
+        models: [
+          { filename: "a.gguf", size_bytes: 100, modified_at: "2026-04-30T00:00:00Z", parsed: { arch: "llama" }, is_loaded: false },
+          { filename: "b.gguf", size_bytes: 200, modified_at: "2026-04-30T00:00:00Z", parsed: null, is_loaded: true },
+        ],
+        loaded: { filename: "b.gguf", port: 8080, started_at: "now" },
+      }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/models");
+  const j = await r.json() as { models: Array<{ name: string }> };
+  assert(j.models.length === 2, `2 models (got ${j.models.length})`);
+  assert(j.models[0].name === "a.gguf", "first model name");
+}
+
 globalThis.fetch = realFetch;
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
