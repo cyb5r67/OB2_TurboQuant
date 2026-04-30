@@ -25,6 +25,29 @@ export interface OllamaConfig {
   auto_route: boolean;
 }
 
+export interface LlmConfig {
+  provider: "ollama" | "llamacpp";
+  /** Empty string → use the same provider as `provider`. */
+  classifier_provider: "" | "ollama" | "llamacpp";
+}
+
+export interface LlamacppConfig {
+  /** Control plane (manager service). Used by Phase 2+. Phase 1 leaves this unread. */
+  manager_url: string;
+  /** Data plane — llama-server's OpenAI-compatible /v1/chat/completions. */
+  chat_url: string;
+  /** Path inside the manager process; surfaced read-only in the dashboard. */
+  models_dir: string;
+  /** Filename only (no path). Empty = no auto-load on manager startup. */
+  default_model: string;
+  ctx_size: number;
+  /** -1 = all layers to GPU, 0 = CPU only, N = first N layers to GPU. */
+  gpu_layers: number;
+  parallel_slots: number;
+  /** Advanced llama-server flags appended verbatim. */
+  extra_args: string[];
+}
+
 export interface EmbedderConfig {
   model: string;
   dim: number;
@@ -67,7 +90,9 @@ export interface ContextConfig {
 }
 
 export interface RuntimeConfig {
+  llm: LlmConfig;
   ollama: OllamaConfig;
+  llamacpp: LlamacppConfig;
   embedder: EmbedderConfig;
   sync: SyncConfig;
   retrieval: RetrievalConfig;
@@ -79,10 +104,19 @@ export interface RuntimeConfig {
 // Structure mirrors the RuntimeConfig but every leaf is the raw string
 // env var name. Used to compute env-overrides.
 const ENV_KEYS: Record<string, string> = {
+  "llm.provider": "OB2_LLM_PROVIDER",
+  "llm.classifier_provider": "OB2_LLM_CLASSIFIER_PROVIDER",
   "ollama.url": "OB2_OLLAMA_URL",
   "ollama.model": "OB2_OLLAMA_MODEL",
   "ollama.classifier_model": "OB2_CLASSIFIER_MODEL",
   "ollama.auto_route": "OB2_AUTO_ROUTE",
+  "llamacpp.manager_url": "OB2_LLAMACPP_MANAGER_URL",
+  "llamacpp.chat_url": "OB2_LLAMACPP_CHAT_URL",
+  "llamacpp.models_dir": "OB2_LLAMACPP_MODELS_DIR",
+  "llamacpp.default_model": "OB2_LLAMACPP_DEFAULT_MODEL",
+  "llamacpp.ctx_size": "OB2_LLAMACPP_CTX_SIZE",
+  "llamacpp.gpu_layers": "OB2_LLAMACPP_GPU_LAYERS",
+  "llamacpp.parallel_slots": "OB2_LLAMACPP_PARALLEL_SLOTS",
   "embedder.model": "OB2_EMBEDDING_MODEL",
   "embedder.dim": "OB2_EMBEDDING_DIM",
   "embedder.batch_flush_ms": "OB2_BATCH_FLUSH_MS",
@@ -109,11 +143,25 @@ const ENV_KEYS: Record<string, string> = {
 };
 
 const DEFAULTS: RuntimeConfig = {
+  llm: {
+    provider: "ollama",
+    classifier_provider: "",
+  },
   ollama: {
     url: "http://localhost:11434",
     model: "gemma3:4b",
     classifier_model: "",
     auto_route: false,
+  },
+  llamacpp: {
+    manager_url: "http://localhost:8081",
+    chat_url: "http://localhost:8080",
+    models_dir: "/data/llamacpp/models",
+    default_model: "",
+    ctx_size: 8192,
+    gpu_layers: -1,
+    parallel_slots: 1,
+    extra_args: [],
   },
   embedder: {
     model: "all-MiniLM-L6-v2",
@@ -165,6 +213,7 @@ let _cached: RuntimeConfig = structuredClone(DEFAULTS);
 
 export function initRuntime(configPath: string): void {
   _path = configPath;
+  _lastMtime = 0; // force fresh read on (re)init
   _reloadIfChanged();
 }
 
@@ -287,7 +336,7 @@ export function validateRuntime(candidate: unknown): Partial<RuntimeConfig> {
   }
   const c = candidate as Record<string, unknown>;
 
-  for (const section of ["ollama", "embedder", "sync", "retrieval", "mail", "graph", "context"]) {
+  for (const section of ["llm", "ollama", "llamacpp", "embedder", "sync", "retrieval", "mail", "graph", "context"]) {
     if (section in c && (typeof c[section] !== "object" || c[section] === null)) {
       throw new Error(`'${section}' must be an object`);
     }
@@ -357,6 +406,62 @@ export function validateRuntime(candidate: unknown): Partial<RuntimeConfig> {
   if (context) {
     if (context.show_uploader_in_context !== undefined && typeof context.show_uploader_in_context !== "boolean") {
       throw new Error("context.show_uploader_in_context must be a boolean");
+    }
+  }
+
+  const llm = c.llm as Record<string, unknown> | undefined;
+  if (llm) {
+    if (llm.provider !== undefined && llm.provider !== "ollama" && llm.provider !== "llamacpp") {
+      throw new Error("llm.provider must be 'ollama' or 'llamacpp'");
+    }
+    if (
+      llm.classifier_provider !== undefined &&
+      llm.classifier_provider !== "" &&
+      llm.classifier_provider !== "ollama" &&
+      llm.classifier_provider !== "llamacpp"
+    ) {
+      throw new Error("llm.classifier_provider must be '', 'ollama', or 'llamacpp'");
+    }
+  }
+
+  const llamacpp = c.llamacpp as Record<string, unknown> | undefined;
+  if (llamacpp) {
+    for (const f of ["manager_url", "chat_url"]) {
+      const v = llamacpp[f];
+      if (v !== undefined) {
+        if (typeof v !== "string") throw new Error(`llamacpp.${f} must be a string`);
+        if (v && !v.startsWith("http://") && !v.startsWith("https://")) {
+          throw new Error(`llamacpp.${f} must start with http:// or https://`);
+        }
+      }
+    }
+    for (const f of ["models_dir", "default_model"]) {
+      if (llamacpp[f] !== undefined && typeof llamacpp[f] !== "string") {
+        throw new Error(`llamacpp.${f} must be a string`);
+      }
+    }
+    if (llamacpp.ctx_size !== undefined) {
+      const n = llamacpp.ctx_size;
+      if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) {
+        throw new Error("llamacpp.ctx_size must be a positive integer");
+      }
+    }
+    if (llamacpp.gpu_layers !== undefined) {
+      const n = llamacpp.gpu_layers;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < -1) {
+        throw new Error("llamacpp.gpu_layers must be an integer ≥ -1");
+      }
+    }
+    if (llamacpp.parallel_slots !== undefined) {
+      const n = llamacpp.parallel_slots;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
+        throw new Error("llamacpp.parallel_slots must be a positive integer");
+      }
+    }
+    if (llamacpp.extra_args !== undefined) {
+      if (!Array.isArray(llamacpp.extra_args) || !llamacpp.extra_args.every((s: unknown) => typeof s === "string")) {
+        throw new Error("llamacpp.extra_args must be an array of strings");
+      }
     }
   }
 
