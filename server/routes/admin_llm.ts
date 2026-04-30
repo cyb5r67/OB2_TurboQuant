@@ -94,6 +94,50 @@ export function adminLlmRoutes(): Hono<AppEnv> {
     }
   });
 
+  // POST /admin/llm/pull — provider-aware pull. Streams NDJSON.
+  app.post("/pull", async (c) => {
+    const adminCheck = requireGlobalAdmin(c);
+    if (adminCheck) return adminCheck;
+
+    const p = getProvider();
+    if (!p.pullModel) return c.json({ error: { type: "not_supported", message: `${p.id} does not support pull` } }, 501);
+    const body = await c.req.json().catch(() => null) as
+      | { source: "ollama"; name: string }
+      | { source: "url"; url: string }
+      | { source: "hf"; repo: string; file: string }
+      | null;
+    if (!body || typeof (body as { source?: unknown }).source !== "string") {
+      return c.json({ error: { type: "invalid_request_error", message: "source required" } }, 400);
+    }
+    // Reject mismatched source/provider combinations.
+    if (body.source === "ollama" && p.id !== "ollama") {
+      return c.json({ error: { type: "invalid_request_error", message: "source=ollama requires OB2_LLM_PROVIDER=ollama" } }, 400);
+    }
+    if ((body.source === "url" || body.source === "hf") && p.id !== "llamacpp") {
+      return c.json({ error: { type: "invalid_request_error", message: "source=url/hf requires OB2_LLM_PROVIDER=llamacpp" } }, 400);
+    }
+
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const emit = (frame: Record<string, unknown>) => {
+          try { controller.enqueue(enc.encode(JSON.stringify(frame) + "\n")); } catch { /* downstream cancelled */ }
+        };
+        try {
+          await p.pullModel!(body, (frame) => emit(frame as unknown as Record<string, unknown>));
+        } catch (e) {
+          emit({ status: "error", message: (e as Error).message });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" },
+    });
+  });
+
   // POST /admin/llm/restart — llamacpp-only, hits manager /v1/restart with overrides.
   app.post("/restart", async (c) => {
     const denied = requireGlobalAdmin(c);

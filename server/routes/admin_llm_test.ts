@@ -134,6 +134,46 @@ globalThis.fetch = ((input: string | URL | Request) => {
   assert(r.status === 501, `Ollama load → 501 (got ${r.status})`);
 }
 
+// Case 8: POST /admin/llm/pull (llamacpp, source=hf) streams NDJSON
+{
+  await Deno.writeTextFile(tmp, "llm:\n  provider: llamacpp\nllamacpp:\n  manager_url: http://lc:8081\n");
+  initRuntime(tmp);
+  const ndjson = [
+    '{"status":"starting"}',
+    '{"status":"downloading","total":1000,"completed":500}',
+    '{"status":"success","filename":"model.gguf"}',
+  ].join("\n") + "\n";
+  globalThis.fetch = ((input: string | URL | Request) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url === "http://lc:8081/v1/pull") {
+      return Promise.resolve(new Response(ndjson, {
+        status: 200, headers: { "Content-Type": "application/x-ndjson" },
+      }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source: "hf", repo: "owner/repo", file: "model.gguf" }),
+  });
+  assert(r.status === 200, `pull 200 (got ${r.status})`);
+  const text = await r.text();
+  assert(text.includes('"starting"'), "starting frame");
+  assert(text.includes('"success"'), "success frame");
+}
+
+// Case 9: pull with mismatched source/provider returns 400
+{
+  // provider is still llamacpp from Case 8
+  const r = await app.request("/admin/llm/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source: "ollama", name: "gemma3:4b" }),
+  });
+  assert(r.status === 400, `mismatched source → 400 (got ${r.status})`);
+}
+
 globalThis.fetch = realFetch;
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
