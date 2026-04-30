@@ -25,8 +25,6 @@ import {
   type PullSpec,
 } from "./provider.ts";
 
-const KEEP_ALIVE = Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h";
-
 interface OllamaChatChunkRaw {
   model?: string;
   message?: { role: string; content: string };
@@ -47,7 +45,7 @@ function bodyFor(messages: ChatMessage[], opts: ChatOpts, stream: boolean) {
     model: model(),
     messages,
     stream,
-    keep_alive: KEEP_ALIVE,
+    keep_alive: Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h",
     options: {
       ...(opts.temperature !== undefined && { temperature: opts.temperature }),
       ...(opts.top_p !== undefined && { top_p: opts.top_p }),
@@ -117,7 +115,15 @@ function ollamaNdjsonToChunks(source: ReadableStream<Uint8Array>): ReadableStrea
             const line = buf.slice(0, idx).trim();
             buf = buf.slice(idx + 1);
             if (!line) continue;
-            const j = JSON.parse(line) as OllamaChatChunkRaw;
+            let j: OllamaChatChunkRaw;
+            try {
+              j = JSON.parse(line) as OllamaChatChunkRaw;
+            } catch {
+              // Malformed mid-stream frame — skip rather than aborting the whole response.
+              // Matches the previous gateway.ts behavior so a single garbled chunk doesn't
+              // truncate a working generation.
+              continue;
+            }
             controller.enqueue(toChunk(j));
             if (j.done) {
               controller.close();
@@ -186,11 +192,13 @@ export const ollamaProvider: Provider = {
     }));
   },
 
-  pullModel(spec: PullSpec, onProgress: (p: PullProgress) => void, signal?: AbortSignal): Promise<void> {
+  async pullModel(spec: PullSpec, onProgress: (p: PullProgress) => void, signal?: AbortSignal): Promise<void> {
     if (spec.source !== "ollama" || !spec.name) {
-      throw new Error("ollama provider only accepts {source: 'ollama', name}");
+      throw new Error(
+        `ollama provider rejected pull spec: source="${spec.source}" name="${spec.name ?? ""}" — expected source="ollama" with a non-empty name`,
+      );
     }
-    return ollamaPull(spec.name, (p) => onProgress({
+    return await ollamaPull(spec.name, (p) => onProgress({
       status: p.status,
       total: p.total,
       completed: p.completed,
@@ -201,9 +209,9 @@ export const ollamaProvider: Provider = {
     throw new NotSupported("loadModel", "ollama");
   },
 
-  unloadModel(name?: string): Promise<void> {
+  async unloadModel(name?: string): Promise<void> {
     if (!name) throw new Error("ollama unload requires a model name");
-    return ollamaUnload(name);
+    return await ollamaUnload(name);
   },
 
   warmModel(name: string): Promise<void> {

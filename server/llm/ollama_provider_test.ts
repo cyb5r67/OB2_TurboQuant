@@ -100,6 +100,62 @@ initRuntime(tmp);
   assert(label === "gemma3:4b", `activeModelLabel: got "${label}"`);
 }
 
+// Case 5: Ollama returns 4xx/5xx → adapter throws with status code in the message
+{
+  mockFetch((url) => {
+    if (String(url).endsWith("/api/chat")) {
+      return new Response("model not loaded", { status: 503 });
+    }
+    throw new Error("unexpected url " + url);
+  });
+  let caught: Error | null = null;
+  try {
+    await ollamaProvider.chatNonStream([{ role: "user", content: "hi" }], {});
+  } catch (e) {
+    caught = e as Error;
+  }
+  assert(caught !== null, "chatNonStream throws on 503");
+  assert(caught!.message.includes("503"), `error message includes status code (got: ${caught!.message})`);
+  assert(caught!.message.includes("model not loaded"), "error message includes upstream body");
+  restoreFetch();
+}
+
+// Case 6: malformed mid-stream NDJSON line is silently skipped, valid frames still delivered
+// (matches the prior gateway.ts behavior — a single garbled chunk should not truncate
+// an otherwise-working generation).
+{
+  const ndjson = [
+    '{"model":"gemma3:4b","message":{"role":"assistant","content":"A"},"done":false}',
+    '{this-is-not-json',                           // garbled mid-stream frame
+    '{"model":"gemma3:4b","message":{"role":"assistant","content":"B"},"done":false}',
+    '{"model":"gemma3:4b","done":true,"done_reason":"stop"}',
+  ].join("\n") + "\n";
+
+  mockFetch((url) => {
+    if (String(url).endsWith("/api/chat")) {
+      return new Response(ndjson, { status: 200 });
+    }
+    throw new Error("unexpected url " + url);
+  });
+
+  const stream = await ollamaProvider.chatStream(
+    [{ role: "user", content: "hi" }],
+    {},
+  );
+  const reader = stream.getReader();
+  const collected: ChatChunk[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    collected.push(value!);
+  }
+  assert(collected.length === 3, `3 chunks (garbled frame skipped); got ${collected.length}`);
+  assert(collected[0].content === "A", "first valid chunk delivered");
+  assert(collected[1].content === "B", "second valid chunk delivered (after garbled frame)");
+  assert(collected[2].done && collected[2].finish_reason === "stop", "terminal chunk reached despite garbled frame");
+  restoreFetch();
+}
+
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);
 console.log("\nAll ollama_provider tests passed.");
