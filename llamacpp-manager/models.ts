@@ -290,3 +290,26 @@ function isSafeFilename(name: string): boolean {
     && !name.includes("..")
     && name.endsWith(".gguf");
 }
+
+const HF_DEFAULT_BASE = "https://huggingface.co";
+
+export async function pullFromHf(
+  repo: string,
+  hfFile: string,
+  modelsDir: string,
+  outFilename: string,
+  onProgress: (p: PullProgress) => void,
+): Promise<void> {
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+    throw new Error(`pull rejected: invalid HF repo "${repo}"`);
+  }
+  if (hfFile.includes("/") || hfFile.includes("..")) {
+    throw new Error(`pull rejected: invalid HF file "${hfFile}"`);
+  }
+  const base = Deno.env.get("OB2_LLAMACPP_HF_BASE_URL") || HF_DEFAULT_BASE;
+  const url = `${base}/${repo}/resolve/main/${hfFile}`;
+  const headers: Record<string, string> = {};
+  const tok = Deno.env.get("OB2_HF_TOKEN");
+  if (tok) headers["Authorization"] = `Bearer ${tok}`;
+  await pullFromUrl(url, modelsDir, outFilename, onProgress, headers);
+}

@@ -169,5 +169,43 @@ import { pullFromUrl, isDeniedIp } from "./models.ts";
   await Deno.remove(dir, { recursive: true });
 }
 
+import { pullFromHf } from "./models.ts";
+
+// Case 10: pullFromHf builds the correct URL and forwards HF token when set
+{
+  Deno.env.set("OB2_LLAMACPP_ALLOW_LOCAL_PULL", "1");
+  Deno.env.set("OB2_HF_TOKEN", "hf-secret-token");
+  const dir = await Deno.makeTempDir();
+  const body = new Uint8Array(1024);
+  let receivedAuth: string | null = null;
+  let receivedPath: string | null = null;
+
+  const ac = new AbortController();
+  const port = 18381;
+  const serverFinished = Deno.serve({
+    port,
+    signal: ac.signal,
+    onListen: () => {},
+  }, (req) => {
+    receivedAuth = req.headers.get("Authorization");
+    receivedPath = new URL(req.url).pathname;
+    return new Response(body, { status: 200, headers: { "Content-Length": String(body.length) } });
+  }).finished;
+
+  await new Promise((r) => setTimeout(r, 100));
+
+  // Override the HF base URL via env so the test hits localhost:18381 instead.
+  Deno.env.set("OB2_LLAMACPP_HF_BASE_URL", `http://127.0.0.1:${port}`);
+  await pullFromHf("foo/bar", "model.Q4_K_M.gguf", dir, "model.Q4_K_M.gguf", () => {});
+  Deno.env.delete("OB2_LLAMACPP_HF_BASE_URL");
+  ac.abort();
+  await serverFinished.catch(() => {});
+
+  assert(receivedAuth === "Bearer hf-secret-token", `HF Authorization forwarded (got: ${receivedAuth})`);
+  assert(receivedPath === "/foo/bar/resolve/main/model.Q4_K_M.gguf", `HF URL path correct (got: ${receivedPath})`);
+  Deno.env.delete("OB2_HF_TOKEN");
+  await Deno.remove(dir, { recursive: true });
+}
+
 if (failures > 0) Deno.exit(1);
 console.log("\nAll models tests passed.");
