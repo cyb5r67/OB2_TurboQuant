@@ -10,7 +10,7 @@
 
 import { Hono } from "hono";
 import { bearerAuth } from "./auth.ts";
-import { scan } from "./models.ts";
+import { pullFromHf, pullFromUrl, type PullProgress, scan } from "./models.ts";
 import { LlamaSupervisor } from "./process.ts";
 import { readLoaded, writeLoaded, clearLoaded } from "./state.ts";
 
@@ -188,6 +188,86 @@ app.post("/v1/restart", async (c) => {
     loaded: {
       filename: state.model, ctx_size, gpu_layers, parallel_slots,
       port: state.port, started_at: state.started_at,
+    },
+  });
+});
+
+interface PullBody {
+  source?: unknown;
+  url?: unknown;
+  repo?: unknown;
+  file?: unknown;
+}
+
+function safeFilenameFromUrl(url: string): string {
+  const u = new URL(url);
+  const last = u.pathname.split("/").filter(Boolean).pop() || "";
+  if (!last.endsWith(".gguf")) {
+    throw new Error("URL must end in a .gguf path component");
+  }
+  if (last.includes("..") || last.length > 256) {
+    throw new Error("derived filename rejected (length/.. check)");
+  }
+  return last;
+}
+
+app.post("/v1/pull", async (c) => {
+  const body = await c.req.json().catch(() => null) as PullBody | null;
+  if (!body) {
+    return c.json({ error: { type: "invalid_request_error", message: "JSON body required" } }, 400);
+  }
+
+  let outFilename: string;
+  let runner: (onP: (p: PullProgress) => void) => Promise<void>;
+
+  if (body.source === "url") {
+    if (typeof body.url !== "string") {
+      return c.json({ error: { type: "invalid_request_error", message: "url required" } }, 400);
+    }
+    try { outFilename = safeFilenameFromUrl(body.url); }
+    catch (e) { return c.json({ error: { type: "invalid_request_error", message: (e as Error).message } }, 400); }
+    runner = (onP) => pullFromUrl(body.url as string, modelsDir, outFilename, onP);
+  } else if (body.source === "hf") {
+    if (typeof body.repo !== "string" || typeof body.file !== "string") {
+      return c.json({ error: { type: "invalid_request_error", message: "repo and file required" } }, 400);
+    }
+    if (!body.file.endsWith(".gguf")) {
+      return c.json({ error: { type: "invalid_request_error", message: "file must end in .gguf" } }, 400);
+    }
+    outFilename = body.file;
+    runner = (onP) => pullFromHf(body.repo as string, body.file as string, modelsDir, outFilename, onP);
+  } else {
+    return c.json({ error: { type: "invalid_request_error", message: "source must be 'url' or 'hf'" } }, 400);
+  }
+
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (p: PullProgress) => {
+        try { controller.enqueue(enc.encode(JSON.stringify(p) + "\n")); }
+        catch { /* downstream cancelled */ }
+      };
+      try {
+        await runner((p) => {
+          if (p.status === "success") {
+            emit({ ...p, ...{ filename: outFilename } as Record<string, unknown> });
+          } else {
+            emit(p);
+          }
+        });
+      } catch (err) {
+        emit({ status: "error", ...({ message: (err as Error).message } as Record<string, unknown>) } as PullProgress);
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-cache",
     },
   });
 });
