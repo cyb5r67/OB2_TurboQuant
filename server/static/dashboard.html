@@ -406,6 +406,40 @@
       </fieldset>
     </div>
 
+    <h2 style="margin-top:1.5rem">Classifier</h2>
+    <div class="card">
+      <div style="color:var(--muted);font-size:0.85rem;margin-bottom:0.75rem">
+        The classifier routes user queries to the most relevant knowledge domain when no <code>@domain</code> prefix is given.
+        Setting a separate classifier provider lets you keep classification on a small fast model (e.g. Ollama's <code>qwen2.5:0.5b</code>) while chat runs on llama-server.
+      </div>
+
+      <fieldset id="classifier-fieldset" style="border:none;padding:0;margin:0 0 0.75rem 0">
+        <label style="margin-right:1rem"><input type="radio" name="classifier-provider" value=""> Same as chat provider</label>
+        <label style="margin-right:1rem"><input type="radio" name="classifier-provider" value="ollama"> Ollama</label>
+        <label><input type="radio" name="classifier-provider" value="llamacpp"> llama-server</label>
+      </fieldset>
+
+      <div style="background:var(--bg);border:1px solid var(--border);padding:0.5rem 0.75rem;border-radius:4px;margin-bottom:0.75rem">
+        <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.25rem">Current effective configuration:</div>
+        <ul id="classifier-effective" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:0.8rem;list-style:none;padding-left:0;margin:0">
+          <li>Chat:        <span id="cls-chat" style="color:var(--accent)">…</span></li>
+          <li>Classifier:  <span id="cls-classifier" style="color:var(--accent)">…</span></li>
+        </ul>
+      </div>
+
+      <div id="classifier-model-row" style="display:none">
+        <label for="classifier-model-input" style="font-size:0.85rem">
+          Classifier model (Ollama only):
+        </label>
+        <input id="classifier-model-input" type="text" placeholder="qwen2.5:0.5b" style="width:20em;margin-left:0.5rem">
+        <button data-action="save-classifier-model" style="margin-left:0.5rem">Save</button>
+        <span id="classifier-model-status" style="color:var(--muted);font-size:0.8rem;margin-left:0.5rem"></span>
+      </div>
+      <div id="classifier-llamacpp-note" style="display:none;font-style:italic;color:var(--muted);font-size:0.85rem">
+        When the classifier provider is llama-server, the loaded chat model is reused — there is no separate classifier model because llama-server holds one model at a time.
+      </div>
+    </div>
+
     <h2 style="margin-top:1.5rem">Email (SMTP)</h2>
     <div class="card">
       <div id="smtp-status-indicator" style="margin-bottom:0.5rem;font-size:0.9rem"></div>

@@ -2014,6 +2014,7 @@ LOADERS.config = () => {
   loadSmtpStatus();
   loadMailConfig();
   loadProviderSettings();
+  loadClassifierSettings();
 };
 
 async function loadSmtpStatus() {
@@ -2164,6 +2165,44 @@ async function loadProviderSettings() {
   document.getElementById('lc-parallel-slots').value = lc.parallel_slots ?? 1;
 }
 
+async function loadClassifierSettings() {
+  let cfg;
+  try { cfg = await api('/admin/config'); }
+  catch { return; }
+  // Use `effective` so default values populate even on a fresh config.
+  const eff = cfg.effective || cfg;  // fallback for older shape
+
+  const chatProvider = eff.llm?.provider || 'ollama';
+  const cls = eff.llm?.classifier_provider || '';
+  const effectiveCls = cls === '' ? chatProvider : cls;
+
+  // Set the radio
+  for (const radio of document.querySelectorAll('input[name="classifier-provider"]')) {
+    radio.checked = radio.value === cls;
+  }
+
+  // Effective configuration display
+  const ollamaModel = eff.ollama?.model || '?';
+  const ollamaClassifierModel = eff.ollama?.classifier_model || ollamaModel;
+  const llamacppLabel = eff.llamacpp?.default_model || '(loaded model)';
+
+  document.getElementById('cls-chat').textContent =
+    chatProvider === 'ollama'
+      ? `Ollama → ${ollamaModel}`
+      : `llama-server → ${llamacppLabel}`;
+  document.getElementById('cls-classifier').textContent =
+    effectiveCls === 'ollama'
+      ? `Ollama → ${ollamaClassifierModel}`
+      : `llama-server → ${llamacppLabel}`;
+
+  // Show classifier-model input only when the resolved classifier is Ollama
+  document.getElementById('classifier-model-row').style.display = effectiveCls === 'ollama' ? '' : 'none';
+  document.getElementById('classifier-llamacpp-note').style.display = effectiveCls === 'llamacpp' ? '' : 'none';
+
+  // Populate the input value (always — it's persisted regardless of which provider is active)
+  document.getElementById('classifier-model-input').value = eff.ollama?.classifier_model || '';
+}
+
 // PUT a merged file config — fetch current `file`, overlay the patch sections,
 // then send as JSON. PUT /admin/config parses the body with js-yaml on the
 // server, and JSON is a strict subset of YAML so this round-trips cleanly.
@@ -2231,6 +2270,38 @@ document.body.addEventListener('click', async (e) => {
     // Reload YAML editor + provider form so the operator sees persisted state.
     loadConfig();
     loadProviderSettings();
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  } catch (err) {
+    status.textContent = 'Save failed: ' + err.message;
+  }
+});
+
+// Classifier-provider radio change → patch llm.classifier_provider, refresh the section
+document.addEventListener('DOMContentLoaded', () => {
+  for (const radio of document.querySelectorAll('input[name="classifier-provider"]')) {
+    radio.addEventListener('change', async () => {
+      const v = document.querySelector('input[name="classifier-provider"]:checked').value;
+      try {
+        await _putRuntimeConfigPatch({ llm: { classifier_provider: v } });
+        await loadClassifierSettings();
+        refreshLlmBadge();
+      } catch (e) {
+        alert('Failed to set classifier provider: ' + e.message);
+      }
+    });
+  }
+});
+
+// Save classifier-model button (Ollama-only field)
+document.body.addEventListener('click', async (e) => {
+  if (e.target?.dataset?.action !== 'save-classifier-model') return;
+  const status = document.getElementById('classifier-model-status');
+  status.textContent = 'Saving…';
+  const v = document.getElementById('classifier-model-input').value;
+  try {
+    await _putRuntimeConfigPatch({ ollama: { classifier_model: v } });
+    status.textContent = 'Saved.';
+    await loadClassifierSettings();
     setTimeout(() => { status.textContent = ''; }, 2000);
   } catch (err) {
     status.textContent = 'Save failed: ' + err.message;
