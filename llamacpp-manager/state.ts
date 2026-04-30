@@ -19,13 +19,27 @@ export async function readLoaded(modelsDir: string): Promise<LoadedState | null>
   catch { return null; }
   try {
     const j = JSON.parse(text) as LoadedState;
-    if (typeof j.filename !== "string" || typeof j.ctx_size !== "number") return null;
+    // Strict guard on EVERY required field. A partial/hand-edited file is
+    // treated as if absent — Task 9's restoreOnStartup passes these values
+    // directly to supervisor.spawn(), so undefineds propagate badly.
+    if (
+      typeof j.filename !== "string" ||
+      typeof j.ctx_size !== "number" ||
+      typeof j.gpu_layers !== "number" ||
+      typeof j.parallel_slots !== "number" ||
+      typeof j.port !== "number" ||
+      typeof j.started_at !== "string"
+    ) return null;
     return j;
   } catch {
     return null;
   }
 }
 
+// Note: plain writeTextFile is acceptable because the payload is <4KB (a single
+// atomic kernel write on Linux) and readLoaded defends against truncated /
+// malformed reads. If LoadedState ever grows past PIPE_BUF or gains nested
+// structure, switch to temp+rename.
 export async function writeLoaded(modelsDir: string, s: LoadedState): Promise<void> {
   const path = `${modelsDir}/${FILENAME}`;
   await Deno.writeTextFile(path, JSON.stringify(s, null, 2));
