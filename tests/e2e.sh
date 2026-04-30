@@ -1247,6 +1247,82 @@ else
 fi
 
 # ─────────────────────────────────────────────
+echo
+echo "── Step 22: Provider abstraction (llamacpp) ──"
+
+verify_llamacpp_provider() {
+  local fake_pid llama_server_pid resp
+  echo "  Stopping main OB2 server before swapping provider..."
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+  fi
+
+  echo "  Starting fake llama-server on :18080..."
+  "$DENO" run --allow-net "$PROJECT_DIR/tests/fixtures/fake-llama-server.ts" --port 18080 \
+    >/tmp/fake-llama.log 2>&1 &
+  fake_pid=$!
+
+  # Wait for fake server health
+  local ok=0
+  for _ in $(seq 1 25); do
+    if curl -fsS http://localhost:18080/health >/dev/null 2>&1; then ok=1; break; fi
+    sleep 0.2
+  done
+  if [ "$ok" -ne 1 ]; then
+    echo "  FAIL: fake llama-server failed to come up (see /tmp/fake-llama.log)"
+    TESTS=$((TESTS + 1)); FAIL=$((FAIL + 1))
+    kill "$fake_pid" 2>/dev/null || true
+    wait "$fake_pid" 2>/dev/null || true
+    return
+  fi
+
+  echo "  Starting OB2 server with OB2_LLM_PROVIDER=llamacpp..."
+  (
+    cd "$SERVER_DIR"
+    env $(grep -v '^#' "$ENV_FILE" | grep -v '^\s*$' | xargs) \
+      OB2_LLM_PROVIDER=llamacpp \
+      OB2_LLAMACPP_CHAT_URL=http://localhost:18080 \
+      OB2_LLAMACPP_MANAGER_URL=http://localhost:18081 \
+      "$DENO" task start >/tmp/ob2-llamacpp.log 2>&1 &
+    echo $! >/tmp/ob2-llamacpp.pid
+  )
+  sleep 8
+  llama_server_pid=$(cat /tmp/ob2-llamacpp.pid 2>/dev/null || echo "")
+
+  # Stream a chat request through the gateway.
+  resp=$(curl -fsS -N -H "Authorization: Bearer $KEY" \
+    -H "Content-Type: application/json" \
+    --max-time 30 \
+    -d '{"model":"ob2","messages":[{"role":"user","content":"hi"}],"stream":true}' \
+    "$BASE/v1/chat/completions" || true)
+
+  # Tear down the llamacpp-mode server and the fake.
+  if [ -n "$llama_server_pid" ]; then
+    kill "$llama_server_pid" 2>/dev/null || true
+    wait "$llama_server_pid" 2>/dev/null || true
+  fi
+  kill "$fake_pid" 2>/dev/null || true
+  wait "$fake_pid" 2>/dev/null || true
+  rm -f /tmp/ob2-llamacpp.pid
+
+  TESTS=$((TESTS + 1))
+  if echo "$resp" | grep -q '"content":"Hello"' && echo "$resp" | grep -q '\[DONE\]'; then
+    echo "  PASS: llamacpp provider streams chat through gateway"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: llamacpp provider chat path"
+    echo "      response head: $(echo "$resp" | head -c 200)"
+    echo "      ob2 log tail (see /tmp/ob2-llamacpp.log):"
+    tail -n 20 /tmp/ob2-llamacpp.log 2>/dev/null | sed 's/^/        /'
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+verify_llamacpp_provider
+
+# ─────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────
 echo
