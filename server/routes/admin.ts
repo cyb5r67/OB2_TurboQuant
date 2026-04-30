@@ -64,6 +64,7 @@ import {
   deleteModel as deleteOllamaModel,
 } from "../ollama/client.ts";
 import { startPull, getPull, listPulls, cancelPull } from "../ollama/pulls.ts";
+import { adminLlmRoutes } from "./admin_llm.ts";
 
 type AppEnv = { Variables: { auth?: AuthContext } };
 
@@ -1068,6 +1069,11 @@ export function adminRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
       return c.json({ error: safeError(err, "internal server error") }, 500);
     }
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // Provider-aware LLM endpoints — /admin/llm/{capabilities,active}
+  // ─────────────────────────────────────────────────────────────
+  app.route("/llm", adminLlmRoutes());
 
   // ─────────────────────────────────────────────────────────────
   // LLM management — list, switch, pull, delete Ollama models
