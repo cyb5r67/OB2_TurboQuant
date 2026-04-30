@@ -14,6 +14,7 @@ import type { Config } from "../config.ts";
 import type { Sidecar } from "../sidecar.ts";
 import { mcpAuthMulti, type AuthContext, hasPermission } from "../users.ts";
 import { dispatch, loadIngestEnv } from "../import/runner.ts";
+import { getProvider, type ChatMessage } from "../llm/provider.ts";
 
 // AsyncLocalStorage carries the authenticated user's context into MCP tool handlers.
 const authStore = new AsyncLocalStorage<AuthContext>();
@@ -372,7 +373,7 @@ function buildMcpServer(config: Config, sidecar: Sidecar): McpServer {
         }
 
         // 2. Synthesize via Ollama
-        const messages = [
+        const messages: ChatMessage[] = [
           {
             role: "system",
             content:
@@ -382,23 +383,7 @@ function buildMcpServer(config: Config, sidecar: Sidecar): McpServer {
           },
           { role: "user", content: question },
         ];
-        const ollamaResp = await fetch(`${config.ollamaUrl}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: config.ollamaModel,
-            messages,
-            stream: false,
-            keep_alive: Deno.env.get("OB2_OLLAMA_KEEP_ALIVE") || "24h",
-          }),
-        });
-        if (!ollamaResp.ok) {
-          const msg = await ollamaResp.text().catch(() => "");
-          throw new Error(`Ollama ${ollamaResp.status}: ${msg}`);
-        }
-        const ollamaData = await ollamaResp.json() as {
-          message: { content: string };
-        };
+        const r = await getProvider().chatNonStream(messages, {});
 
         // 3. Format response with sources
         const sourceList = ctx.retrieved_docs
@@ -410,7 +395,7 @@ function buildMcpServer(config: Config, sidecar: Sidecar): McpServer {
         return {
           content: [{
             type: "text" as const,
-            text: ollamaData.message.content +
+            text: r.content +
               (sourceList ? `\n\nSources:\n${sourceList}` : ""),
           }],
         };
