@@ -1335,6 +1335,69 @@ verify_llamacpp_provider() {
 
 verify_llamacpp_provider
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Step 23: llamacpp manager smoke
+#
+# Starts ob2-llamacpp-manager pointed at a temp models dir with a staged GGUF
+# fixture, then GETs /v1/models and asserts the file is listed. Exercises the
+# full Group A surface (auth + scan + GGUF parser).
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "── Step 23: llamacpp manager smoke ──"
+
+verify_llamacpp_manager_smoke() {
+  local manager_pid resp manager_token="smoke-token-$$"
+  local mdir="/tmp/ob2-llamacpp-smoke-$$"
+  mkdir -p "$mdir"
+  cp "$PROJECT_DIR/tests/fixtures/sample.gguf" "$mdir/model.gguf"
+
+  # Stop the long-running OB2 server (Phase 1 Step 22 already cleared SERVER_PID
+  # in the no-restart-after path; defensive null-check in case ordering changes).
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+  fi
+
+  echo "  Starting manager on :18181 with models dir $mdir..."
+  OB2_LLAMACPP_MANAGER_TOKEN="$manager_token" \
+  OB2_LLAMACPP_MANAGER_PORT=18181 \
+  OB2_LLAMACPP_CHAT_PORT=18299 \
+  OB2_LLAMACPP_MODELS_DIR="$mdir" \
+  OB2_LLAMA_SERVER_BIN="$DENO" \
+    "$DENO" run --allow-all --config "$PROJECT_DIR/llamacpp-manager/deno.json" \
+    "$PROJECT_DIR/llamacpp-manager/main.ts" >/tmp/manager-smoke.log 2>&1 &
+  manager_pid=$!
+
+  for _ in $(seq 1 25); do
+    if curl -fsS http://localhost:18181/healthz >/dev/null 2>&1; then break; fi
+    sleep 0.2
+  done
+
+  echo "  Verifying GET /v1/models returns the staged file..."
+  resp=$(curl -fsS -H "Authorization: Bearer $manager_token" http://localhost:18181/v1/models || true)
+
+  kill "$manager_pid" 2>/dev/null || true
+  wait 2>/dev/null
+  rm -rf "$mdir"
+
+  TESTS=$((TESTS + 1))
+  if echo "$resp" | grep -q '"filename":"model.gguf"'; then
+    echo "  PASS: manager /v1/models returns the staged file"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: manager /v1/models did not list the file"
+    echo "      response: $(echo "$resp" | head -c 200)"
+    echo "      manager log tail: $(tail -n 10 /tmp/manager-smoke.log 2>/dev/null)"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+verify_llamacpp_manager_smoke
+
+# Step 23 is terminal — future Step 24 must call start_server.
+
 # ─────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────
