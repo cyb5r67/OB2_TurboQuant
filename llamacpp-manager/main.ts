@@ -291,5 +291,32 @@ app.delete("/v1/models/:filename", async (c) => {
   return c.json({ ok: true });
 });
 
+async function restoreOnStartup() {
+  const last = await readLoaded(modelsDir);
+  if (!last) {
+    console.log("ob2-llamacpp-manager: no .last_loaded.json — starting idle");
+    return;
+  }
+  console.log(`ob2-llamacpp-manager: restoring ${last.filename} from .last_loaded.json`);
+  try {
+    await supervisor.spawn({
+      filename: last.filename,
+      ctx_size: last.ctx_size,
+      gpu_layers: last.gpu_layers,
+      parallel_slots: last.parallel_slots,
+    });
+    await supervisor.awaitHealth(60_000);
+    console.log(`ob2-llamacpp-manager: restored ${last.filename}`);
+  } catch (err) {
+    console.error(`ob2-llamacpp-manager: restore failed: ${(err as Error).message}`);
+    await supervisor.kill().catch(() => {});
+    // Do NOT clearLoaded — operator may want to inspect the persisted state.
+  }
+}
+
+// Kick off restore but don't block listen. /healthz and /v1/models work
+// even while restore is in flight.
+restoreOnStartup().catch((e) => console.error("restore error:", e));
+
 console.log(`ob2-llamacpp-manager v${VERSION} listening on :${managerPort}`);
 Deno.serve({ port: managerPort }, app.fetch);
