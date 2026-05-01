@@ -1,4 +1,4 @@
-# ob2-llamacpp container: builds llama.cpp from source (CUDA 12.4) and the
+# ob2-llamacpp container: builds llama.cpp from source (CUDA 12.8) and the
 # Deno-based ob2-llamacpp-manager, then assembles a runtime image.
 #
 # No `# syntax=` directive: we don't use heredocs, --mount, or secrets, so the
@@ -8,7 +8,7 @@
 # Bumps to LLAMA_CPP_REF: see docs/llamacpp-version-bump.md.
 
 # ─── Stage 1: build llama.cpp (with CUDA) ─────────────────────────────────────
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS llama-build
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS llama-build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates curl libcurl4-openssl-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -24,7 +24,12 @@ WORKDIR /src
 # build fails with undefined references to cuMemCreate / cuGetErrorString.
 RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.so \
  && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.so.1
+# CMAKE_CUDA_ARCHITECTURES: 89 = Ada (RTX 40xx), 120 = Blackwell (RTX 50xx).
+# Trimmed from llama.cpp's default arch list (50;61;70;75;80;86;89) to cut
+# build time roughly in half. Add older archs back here if you need to run the
+# image on Pascal/Volta/Turing/Ampere hardware.
 RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CUDA_ARCHITECTURES="89;120" \
  && cmake --build build --config Release -j --target llama-server
 
 # ─── Stage 2: compile the Deno manager into a static binary ───────────────────
@@ -37,7 +42,7 @@ RUN deno cache main.ts \
     --output /out/ob2-llamacpp-manager main.ts
 
 # ─── Stage 3: minimal runtime ─────────────────────────────────────────────────
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libcurl4 tini curl \
  && rm -rf /var/lib/apt/lists/*
