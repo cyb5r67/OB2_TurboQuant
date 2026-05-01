@@ -1,9 +1,10 @@
 // Provider abstraction in front of the LLM call sites.
 //
 // `ChatProvider` is non-negotiable — every provider implements it.
-// `ManagementProvider` is partial — methods may throw `NotImplementedInPhase1`
-// or `NotSupported`, gated by `capabilities()` so the dashboard can grey out
-// unsupported actions instead of hitting an endpoint that 501s.
+// `ManagementProvider` is partial — methods may throw `NotSupported` (e.g. an
+// Ollama provider asked to load explicitly, or a llamacpp provider asked to
+// warm), gated by `capabilities()` so the dashboard can grey out unsupported
+// actions instead of hitting an endpoint that 501s.
 //
 // Factory functions `getProvider()` and `getClassifierProvider()` read the
 // active provider from runtime config (hot-reloaded). Adapter modules
@@ -137,14 +138,6 @@ export class NotSupported extends Error {
   constructor(method: string, providerId: string) {
     super(`${providerId} does not support ${method}`);
     this.name = "NotSupported";
-  }
-}
-
-/** Thrown by Phase 1 stubs that depend on the Phase 2 manager service. */
-export class NotImplementedInPhase1 extends Error {
-  constructor(method: string) {
-    super(`${method} requires the llamacpp manager service (Phase 2)`);
-    this.name = "NotImplementedInPhase1";
   }
 }
 
