@@ -6,6 +6,8 @@ export interface LoadedState {
   ctx_size: number;
   gpu_layers: number;
   parallel_slots: number;
+  cache_type_k?: string;
+  cache_type_v?: string;
   port: number;
   started_at: string;
 }

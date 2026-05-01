@@ -109,6 +109,8 @@ Set in `.env` (or export before running scripts). Docker Compose reads the `.env
 | `OB2_LLAMACPP_CTX_SIZE` | `8192` | Default context window size on `/v1/load`. |
 | `OB2_LLAMACPP_GPU_LAYERS` | `-1` | Default GPU layer offload. `-1`=all, `0`=CPU only. |
 | `OB2_LLAMACPP_PARALLEL_SLOTS` | `1` | Concurrent generation slots for `llama-server`. |
+| `OB2_LLAMACPP_CACHE_TYPE_K` | `turbo3` | KV-cache key quantization type passed to `llama-server --cache-type-k`. |
+| `OB2_LLAMACPP_CACHE_TYPE_V` | `turbo3` | KV-cache value quantization type passed to `llama-server --cache-type-v`. |
 | `OB2_HF_TOKEN` | *(unset)* | Optional HuggingFace token for gated repo pulls (forwarded as `Authorization: Bearer` to `huggingface.co`). |
 | `OB2_LLAMA_SERVER_BIN` | `/usr/local/bin/llama-server` | Path the manager uses to spawn `llama-server`. Containerized mode uses the bundled binary; host mode points at `llama-server.exe` or `./llama-server`. |
 

@@ -5,6 +5,8 @@ export interface SpawnOpts {
   ctx_size: number;
   gpu_layers: number;
   parallel_slots: number;
+  cache_type_k?: string;
+  cache_type_v?: string;
 }
 
 export interface SupervisorState {
@@ -59,6 +61,8 @@ export class LlamaSupervisor {
       "--n-gpu-layers", String(opts.gpu_layers),
       "--parallel", String(opts.parallel_slots),
       "--host", "0.0.0.0",
+      ...(opts.cache_type_k ? ["--cache-type-k", opts.cache_type_k] : []),
+      ...(opts.cache_type_v ? ["--cache-type-v", opts.cache_type_v] : []),
     ];
 
     const cmd = new Deno.Command(this.cfg.binary, {

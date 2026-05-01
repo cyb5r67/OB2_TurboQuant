@@ -225,7 +225,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.llamacpp
       args:
-        LLAMA_CPP_REF: "b4404"
+        LLAMA_CPP_REF: "tqp-v0.1.1"
     container_name: ob2-llamacpp
     environment:
       OB2_LLAMACPP_MANAGER_TOKEN: ${OB2_LLAMACPP_MANAGER_TOKEN:?set OB2_LLAMACPP_MANAGER_TOKEN in .env}
@@ -234,6 +234,8 @@ services:
       OB2_LLAMACPP_CTX_SIZE: ${OB2_LLAMACPP_CTX_SIZE:-8192}
       OB2_LLAMACPP_GPU_LAYERS: ${OB2_LLAMACPP_GPU_LAYERS:--1}
       OB2_LLAMACPP_PARALLEL_SLOTS: ${OB2_LLAMACPP_PARALLEL_SLOTS:-1}
+      OB2_LLAMACPP_CACHE_TYPE_K: ${OB2_LLAMACPP_CACHE_TYPE_K:-turbo3}
+      OB2_LLAMACPP_CACHE_TYPE_V: ${OB2_LLAMACPP_CACHE_TYPE_V:-turbo3}
     volumes:
       - llamacpp_models:/data/llamacpp/models
     deploy:

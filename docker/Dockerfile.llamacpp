@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates curl libcurl4-openssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-ARG LLAMA_CPP_REF=b4404
-RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} https://github.com/ggerganov/llama.cpp /src
+ARG LLAMA_CPP_REF=tqp-v0.1.1
+RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} https://github.com/TheTom/llama-cpp-turboquant /src
 WORKDIR /src
 # Make the CUDA driver stub (libcuda.so) discoverable by cmake's standard
 # library search path. The cuda:devel image ships the stub in stubs/ but

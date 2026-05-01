@@ -59,6 +59,8 @@ interface LoadBody {
   ctx_size?: unknown;
   gpu_layers?: unknown;
   parallel_slots?: unknown;
+  cache_type_k?: unknown;
+  cache_type_v?: unknown;
 }
 
 function isSafeFilename(name: unknown): name is string {
@@ -86,13 +88,15 @@ app.post("/v1/load", async (c) => {
   const ctx_size = typeof body.ctx_size === "number" ? body.ctx_size : Number(Deno.env.get("OB2_LLAMACPP_CTX_SIZE") || "8192");
   const gpu_layers = typeof body.gpu_layers === "number" ? body.gpu_layers : Number(Deno.env.get("OB2_LLAMACPP_GPU_LAYERS") || "-1");
   const parallel_slots = typeof body.parallel_slots === "number" ? body.parallel_slots : Number(Deno.env.get("OB2_LLAMACPP_PARALLEL_SLOTS") || "1");
+  const cache_type_k = typeof body.cache_type_k === "string" ? body.cache_type_k : (Deno.env.get("OB2_LLAMACPP_CACHE_TYPE_K") || undefined);
+  const cache_type_v = typeof body.cache_type_v === "string" ? body.cache_type_v : (Deno.env.get("OB2_LLAMACPP_CACHE_TYPE_V") || undefined);
 
   // Serialize concurrent loads.
   const op = loadMutex.then(async () => {
     if (supervisor.getState().running) {
       await supervisor.kill();
     }
-    await supervisor.spawn({ filename, ctx_size, gpu_layers, parallel_slots });
+    await supervisor.spawn({ filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v });
     try {
       await supervisor.awaitHealth(60_000);
     } catch (err) {
@@ -100,7 +104,7 @@ app.post("/v1/load", async (c) => {
       throw err;
     }
     await writeLoaded(modelsDir, {
-      filename, ctx_size, gpu_layers, parallel_slots,
+      filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v,
       port: chatPort,
       started_at: new Date().toISOString(),
     });
@@ -148,6 +152,8 @@ interface RestartBody {
   ctx_size?: unknown;
   gpu_layers?: unknown;
   parallel_slots?: unknown;
+  cache_type_k?: unknown;
+  cache_type_v?: unknown;
 }
 
 app.post("/v1/restart", async (c) => {
@@ -159,10 +165,12 @@ app.post("/v1/restart", async (c) => {
   const ctx_size = typeof body.ctx_size === "number" ? body.ctx_size : cur.ctx_size;
   const gpu_layers = typeof body.gpu_layers === "number" ? body.gpu_layers : cur.gpu_layers;
   const parallel_slots = typeof body.parallel_slots === "number" ? body.parallel_slots : cur.parallel_slots;
+  const cache_type_k = typeof body.cache_type_k === "string" ? body.cache_type_k : cur.cache_type_k;
+  const cache_type_v = typeof body.cache_type_v === "string" ? body.cache_type_v : cur.cache_type_v;
 
   const op = loadMutex.then(async () => {
     if (supervisor.getState().running) await supervisor.kill();
-    await supervisor.spawn({ filename: cur.filename, ctx_size, gpu_layers, parallel_slots });
+    await supervisor.spawn({ filename: cur.filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v });
     try {
       await supervisor.awaitHealth(60_000);
     } catch (err) {
@@ -170,7 +178,7 @@ app.post("/v1/restart", async (c) => {
       throw err;
     }
     await writeLoaded(modelsDir, {
-      filename: cur.filename, ctx_size, gpu_layers, parallel_slots,
+      filename: cur.filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v,
       port: chatPort,
       started_at: new Date().toISOString(),
     });
@@ -304,6 +312,8 @@ async function restoreOnStartup() {
       ctx_size: last.ctx_size,
       gpu_layers: last.gpu_layers,
       parallel_slots: last.parallel_slots,
+      cache_type_k: last.cache_type_k,
+      cache_type_v: last.cache_type_v,
     });
     await supervisor.awaitHealth(60_000);
     console.log(`ob2-llamacpp-manager: restored ${last.filename}`);
