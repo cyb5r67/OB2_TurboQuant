@@ -62,10 +62,11 @@ OB2 is a self-hosted personal RAG platform. Users log in to a web dashboard, upl
 +-------+    +---------+
                   |
            +------v------+
-           | Ollama       |
-           | (on host)    |
-           | gemma3:4b or |
-           | any model    |
+           | LLM provider |
+           | (configurable)|
+           | ollama / llamacpp / |
+           | openai / anthropic / |
+           | gemini       |
            +-------------+
 ```
 
@@ -90,6 +91,8 @@ OB2 is a self-hosted personal RAG platform. Users log in to a web dashboard, upl
 | `routes/auth.ts` | `/auth/*` — login, logout, me, change-password, rotate-key, forgot/reset-password, invite, openwebui-handoff. |
 | `routes/mcp.ts` | 4 MCP tools: `capture_knowledge`, `search_knowledge`, `knowledge_stats`, `chat_knowledge`, `capture_file`. |
 | `routes/gateway.ts` | `/v1/chat/completions` + `/v1/models`. Multi-domain retrieval, @domain prefix routing, service-token impersonation. |
+| `llm/provider.ts` + `{ollama,llamacpp,openai,anthropic,gemini}_provider.ts` | Pluggable inference backend. `getProvider()` / `getClassifierProvider()` dispatch on `llm.provider` / `llm.classifier_provider` from runtime config. Cloud providers are chat-only (management methods throw `NotSupported`). See `docs/llm-providers.md`. |
+| `llm/sse_parsers.ts` | Shared OpenAI-style SSE → `ChatChunk` parser used by the llamacpp + openai adapters. |
 | `routes/admin.ts` | Domain CRUD, alias CRUD, doc deletion, import endpoints, file-download endpoint, user CRUD, sync status. |
 | `routes/classifier.ts` | Opt-in query classifier (unused by chat path; in-tree). |
 | `routes/config_api.ts` | `GET/PUT /admin/config`, Ollama + pgvector connection testers, aggregated metrics. |

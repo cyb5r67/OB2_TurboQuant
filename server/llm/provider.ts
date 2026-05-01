@@ -10,9 +10,12 @@
 // active provider from runtime config (hot-reloaded). Adapter modules
 // register themselves into module-scoped slots in this file.
 
-import { getRuntime } from "../runtime_config.ts";
+import { getRuntime, type ProviderId } from "../runtime_config.ts";
 import { ollamaProvider } from "./ollama_provider.ts";
 import { llamacppProvider } from "./llamacpp_provider.ts";
+import { openaiProvider } from "./openai_provider.ts";
+import { anthropicProvider } from "./anthropic_provider.ts";
+import { geminiProvider } from "./gemini_provider.ts";
 
 // ─────────────────────────────────────────────────────────────
 // Shared types
@@ -102,7 +105,7 @@ export interface Capabilities {
 // ─────────────────────────────────────────────────────────────
 
 export interface ChatProvider {
-  readonly id: "ollama" | "llamacpp";
+  readonly id: ProviderId;
   /** Free-form label for telemetry / status header. */
   activeModelLabel(): Promise<string>;
   chatStream(messages: ChatMessage[], opts: ChatOpts): Promise<ReadableStream<ChatChunk>>;
@@ -145,12 +148,22 @@ export class NotSupported extends Error {
 // Factory (filled in by Task 6)
 // ─────────────────────────────────────────────────────────────
 
+function providerById(id: ProviderId): Provider {
+  switch (id) {
+    case "llamacpp":  return llamacppProvider;
+    case "openai":    return openaiProvider;
+    case "anthropic": return anthropicProvider;
+    case "gemini":    return geminiProvider;
+    case "ollama":    return ollamaProvider;
+  }
+}
+
 export function getProvider(): Provider {
-  return getRuntime().llm.provider === "llamacpp" ? llamacppProvider : ollamaProvider;
+  return providerById(getRuntime().llm.provider);
 }
 
 export function getClassifierProvider(): Provider {
   const cp = getRuntime().llm.classifier_provider;
-  const id = cp === "" ? getRuntime().llm.provider : cp;
-  return id === "llamacpp" ? llamacppProvider : ollamaProvider;
+  const id: ProviderId = cp === "" ? getRuntime().llm.provider : cp;
+  return providerById(id);
 }

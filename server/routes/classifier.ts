@@ -93,12 +93,24 @@ User question: "${query}"`;
     try {
       const provider = getClassifierProvider();
       const opts: ChatOpts = { temperature: 0, max_tokens: 60 };
-      if (provider.id === "ollama") {
-        // Honor the legacy `classifier_model` knob — operators set this to a
-        // smaller/faster model (e.g. qwen2.5:0.5b) than the chat model so
-        // classification doesn't burn full-chat-model VRAM/time. Llamacpp
-        // can't honor it (one model loaded at a time).
-        opts.model = rt.ollama.classifier_model || rt.ollama.model;
+      // Honor each provider's classifier_model knob — operators point this at
+      // a smaller/cheaper model (qwen2.5:0.5b for Ollama, claude-haiku-4-5 for
+      // Anthropic, etc.) so classification doesn't burn the chat model's
+      // VRAM/time/dollars. Llamacpp can't honor it: one model loaded at a
+      // time, switching is a manager op, not a per-request flag.
+      switch (provider.id) {
+        case "ollama":
+          opts.model = rt.ollama.classifier_model || rt.ollama.model;
+          break;
+        case "openai":
+          opts.model = rt.openai.classifier_model || rt.openai.model;
+          break;
+        case "anthropic":
+          opts.model = rt.anthropic.classifier_model || rt.anthropic.model;
+          break;
+        case "gemini":
+          opts.model = rt.gemini.classifier_model || rt.gemini.model;
+          break;
       }
       const r = await provider.chatNonStream(
         [{ role: "user", content: classifierPrompt }],

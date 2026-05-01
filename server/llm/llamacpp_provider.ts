@@ -17,6 +17,7 @@ import {
   type PullProgress,
   type PullSpec,
 } from "./provider.ts";
+import { openAiSseToChunks } from "./sse_parsers.ts";
 
 function chatUrl(): string {
   return getRuntime().llamacpp.chat_url.replace(/\/+$/, "");
@@ -92,75 +93,6 @@ async function chatStream(messages: ChatMessage[], opts: ChatOpts): Promise<Read
     throw new Error(`llama-server ${resp.status}: ${msg}`);
   }
   return openAiSseToChunks(resp.body);
-}
-
-function openAiSseToChunks(source: ReadableStream<Uint8Array>): ReadableStream<ChatChunk> {
-  const reader = source.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  let closed = false;
-
-  return new ReadableStream<ChatChunk>({
-    async pull(controller) {
-      if (closed) {
-        controller.close();
-        return;
-      }
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            closed = true;
-            controller.close();
-            return;
-          }
-          buf += dec.decode(value, { stream: true })
-            .replace(/\r\n/g, "\n")
-            .replace(/\r/g, "\n");
-
-          // SSE frames are separated by blank lines (`\n\n`).
-          let sep: number;
-          while ((sep = buf.indexOf("\n\n")) !== -1) {
-            const frame = buf.slice(0, sep);
-            buf = buf.slice(sep + 2);
-            // Each frame may have multiple `data:` lines; concat them per spec.
-            const dataLines = frame.split("\n").filter((l) => l.startsWith("data:"));
-            // SSE comment / keep-alive frames (e.g. `: ping\n\n`) have no
-            // `data:` line and fall through here harmlessly.
-            if (dataLines.length === 0) continue;
-            const payload = dataLines.map((l) => l.slice(5).trim()).join("\n");
-            if (payload === "[DONE]") {
-              closed = true;
-              controller.close();
-              return;
-            }
-            let parsed: { choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }> };
-            try { parsed = JSON.parse(payload); } catch { continue; }
-            const choice = parsed.choices?.[0];
-            if (!choice) continue;
-            const content = choice.delta?.content ?? "";
-            const finish = choice.finish_reason;
-            if (finish) {
-              if (content) controller.enqueue({ content, done: false });
-              controller.enqueue({
-                content: "",
-                done: true,
-                finish_reason: finish === "length" ? "length" : "stop",
-              });
-              closed = true;
-              controller.close();
-              return;
-            }
-            // Suppress role-only deltas (no content, no finish).
-            if (content) controller.enqueue({ content, done: false });
-          }
-        }
-      } catch (err) {
-        controller.error(err);
-      }
-    },
-    cancel(reason) { reader.cancel(reason); },
-  });
 }
 
 const CAPS: Capabilities = {

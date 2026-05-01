@@ -42,6 +42,13 @@ services:
       # model in VRAM for any normal-cadence conversation. "-1" pins it
       # forever; "0" unloads immediately.
       OB2_OLLAMA_KEEP_ALIVE: ${OB2_OLLAMA_KEEP_ALIVE:-24h}
+      # Cloud-API providers (chat-only). Set OB2_LLM_PROVIDER=openai|anthropic|gemini
+      # in .env to activate; the matching API key MUST be set or chat 401s.
+      # Models, base_url, and other knobs live in /data/config.yaml (see
+      # docs/llm-providers.md).
+      OB2_OPENAI_API_KEY: ${OB2_OPENAI_API_KEY:-}
+      OB2_ANTHROPIC_API_KEY: ${OB2_ANTHROPIC_API_KEY:-}
+      OB2_GEMINI_API_KEY: ${OB2_GEMINI_API_KEY:-}
       OB2_CONTEXT_ENGINE_PATH: /app/context-engine
       OB2_PYTHON: /app/retrieval/.venv/bin/python
       OB2_SIDECAR_SCRIPT: /app/retrieval/sidecar.py

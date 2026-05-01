@@ -25,10 +25,12 @@ export interface OllamaConfig {
   auto_route: boolean;
 }
 
+export type ProviderId = "ollama" | "llamacpp" | "openai" | "anthropic" | "gemini";
+
 export interface LlmConfig {
-  provider: "ollama" | "llamacpp";
+  provider: ProviderId;
   /** Empty string → use the same provider as `provider`. */
-  classifier_provider: "" | "ollama" | "llamacpp";
+  classifier_provider: "" | ProviderId;
 }
 
 export interface LlamacppConfig {
@@ -46,6 +48,38 @@ export interface LlamacppConfig {
   parallel_slots: number;
   /** Advanced llama-server flags appended verbatim. */
   extra_args: string[];
+}
+
+/**
+ * Cloud-API providers. API keys are env-only (OB2_*_API_KEY) — never written
+ * to runtime config so this YAML stays committable.
+ */
+export interface OpenAIConfig {
+  /** Override to point at any OpenAI-compatible endpoint: Groq, Together,
+   *  OpenRouter, vLLM, a bare llama-server, etc. */
+  base_url: string;
+  model: string;
+  /** Empty → falls back to `model`. */
+  classifier_model: string;
+}
+
+export interface AnthropicConfig {
+  base_url: string;
+  model: string;
+  classifier_model: string;
+  /** Anthropic's API requires max_tokens on every call. */
+  max_tokens: number;
+  /** anthropic-version header. */
+  api_version: string;
+  /** Apply cache_control to the system message + the leading user turn so RAG
+   *  context is reused across turns. ~10× cheaper on long-context workloads. */
+  prompt_caching: boolean;
+}
+
+export interface GeminiConfig {
+  base_url: string;
+  model: string;
+  classifier_model: string;
 }
 
 export interface EmbedderConfig {
@@ -93,6 +127,9 @@ export interface RuntimeConfig {
   llm: LlmConfig;
   ollama: OllamaConfig;
   llamacpp: LlamacppConfig;
+  openai: OpenAIConfig;
+  anthropic: AnthropicConfig;
+  gemini: GeminiConfig;
   embedder: EmbedderConfig;
   sync: SyncConfig;
   retrieval: RetrievalConfig;
@@ -117,6 +154,18 @@ const ENV_KEYS: Record<string, string> = {
   "llamacpp.ctx_size": "OB2_LLAMACPP_CTX_SIZE",
   "llamacpp.gpu_layers": "OB2_LLAMACPP_GPU_LAYERS",
   "llamacpp.parallel_slots": "OB2_LLAMACPP_PARALLEL_SLOTS",
+  "openai.base_url": "OB2_OPENAI_BASE_URL",
+  "openai.model": "OB2_OPENAI_MODEL",
+  "openai.classifier_model": "OB2_OPENAI_CLASSIFIER_MODEL",
+  "anthropic.base_url": "OB2_ANTHROPIC_BASE_URL",
+  "anthropic.model": "OB2_ANTHROPIC_MODEL",
+  "anthropic.classifier_model": "OB2_ANTHROPIC_CLASSIFIER_MODEL",
+  "anthropic.max_tokens": "OB2_ANTHROPIC_MAX_TOKENS",
+  "anthropic.api_version": "OB2_ANTHROPIC_API_VERSION",
+  "anthropic.prompt_caching": "OB2_ANTHROPIC_PROMPT_CACHING",
+  "gemini.base_url": "OB2_GEMINI_BASE_URL",
+  "gemini.model": "OB2_GEMINI_MODEL",
+  "gemini.classifier_model": "OB2_GEMINI_CLASSIFIER_MODEL",
   "embedder.model": "OB2_EMBEDDING_MODEL",
   "embedder.dim": "OB2_EMBEDDING_DIM",
   "embedder.batch_flush_ms": "OB2_BATCH_FLUSH_MS",
@@ -162,6 +211,24 @@ const DEFAULTS: RuntimeConfig = {
     gpu_layers: -1,
     parallel_slots: 1,
     extra_args: [],
+  },
+  openai: {
+    base_url: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    classifier_model: "",
+  },
+  anthropic: {
+    base_url: "https://api.anthropic.com",
+    model: "claude-sonnet-4-6",
+    classifier_model: "claude-haiku-4-5",
+    max_tokens: 4096,
+    api_version: "2023-06-01",
+    prompt_caching: true,
+  },
+  gemini: {
+    base_url: "https://generativelanguage.googleapis.com",
+    model: "gemini-2.0-flash",
+    classifier_model: "",
   },
   embedder: {
     model: "all-MiniLM-L6-v2",
@@ -336,7 +403,7 @@ export function validateRuntime(candidate: unknown): Partial<RuntimeConfig> {
   }
   const c = candidate as Record<string, unknown>;
 
-  for (const section of ["llm", "ollama", "llamacpp", "embedder", "sync", "retrieval", "mail", "graph", "context"]) {
+  for (const section of ["llm", "ollama", "llamacpp", "openai", "anthropic", "gemini", "embedder", "sync", "retrieval", "mail", "graph", "context"]) {
     if (section in c && (typeof c[section] !== "object" || c[section] === null)) {
       throw new Error(`'${section}' must be an object`);
     }
@@ -409,18 +476,57 @@ export function validateRuntime(candidate: unknown): Partial<RuntimeConfig> {
     }
   }
 
+  const VALID_PROVIDERS = ["ollama", "llamacpp", "openai", "anthropic", "gemini"] as const;
   const llm = c.llm as Record<string, unknown> | undefined;
   if (llm) {
-    if (llm.provider !== undefined && llm.provider !== "ollama" && llm.provider !== "llamacpp") {
-      throw new Error("llm.provider must be 'ollama' or 'llamacpp'");
+    if (
+      llm.provider !== undefined &&
+      !VALID_PROVIDERS.includes(llm.provider as typeof VALID_PROVIDERS[number])
+    ) {
+      throw new Error(`llm.provider must be one of: ${VALID_PROVIDERS.join(", ")}`);
     }
     if (
       llm.classifier_provider !== undefined &&
       llm.classifier_provider !== "" &&
-      llm.classifier_provider !== "ollama" &&
-      llm.classifier_provider !== "llamacpp"
+      !VALID_PROVIDERS.includes(llm.classifier_provider as typeof VALID_PROVIDERS[number])
     ) {
-      throw new Error("llm.classifier_provider must be '', 'ollama', or 'llamacpp'");
+      throw new Error(`llm.classifier_provider must be '' or one of: ${VALID_PROVIDERS.join(", ")}`);
+    }
+  }
+
+  const validateCloudProvider = (
+    name: "openai" | "anthropic" | "gemini",
+    block: Record<string, unknown> | undefined,
+  ) => {
+    if (!block) return;
+    for (const f of ["base_url", "model", "classifier_model"]) {
+      if (block[f] !== undefined && typeof block[f] !== "string") {
+        throw new Error(`${name}.${f} must be a string`);
+      }
+    }
+    if (typeof block.base_url === "string" && block.base_url) {
+      if (!block.base_url.startsWith("http://") && !block.base_url.startsWith("https://")) {
+        throw new Error(`${name}.base_url must start with http:// or https://`);
+      }
+    }
+  };
+  validateCloudProvider("openai", c.openai as Record<string, unknown> | undefined);
+  validateCloudProvider("anthropic", c.anthropic as Record<string, unknown> | undefined);
+  validateCloudProvider("gemini", c.gemini as Record<string, unknown> | undefined);
+
+  const anthropic = c.anthropic as Record<string, unknown> | undefined;
+  if (anthropic) {
+    if (anthropic.max_tokens !== undefined) {
+      const n = anthropic.max_tokens;
+      if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) {
+        throw new Error("anthropic.max_tokens must be a positive integer");
+      }
+    }
+    if (anthropic.api_version !== undefined && typeof anthropic.api_version !== "string") {
+      throw new Error("anthropic.api_version must be a string");
+    }
+    if (anthropic.prompt_caching !== undefined && typeof anthropic.prompt_caching !== "boolean") {
+      throw new Error("anthropic.prompt_caching must be a boolean");
     }
   }
 
