@@ -395,11 +395,111 @@ The bundle cap is intentional. Re-embedding on import (the path that would
 let bundles cross between embedding models) is not implemented; mismatches
 hard-fail.
 
-### LLM Management (global admin)
+### LLM Management — provider-aware (`/admin/llm/*`, global admin)
 
-The dashboard's **LLMs** tab is built on these endpoints. All require global
-admin. The Ollama host URL comes from `getRuntime().ollama.url` (and
-ultimately `OB2_OLLAMA_URL`).
+The dashboard's **LLMs** tab is built on these endpoints. They dispatch through the active provider (`getProvider()`), so the same routes work for Ollama and llama.cpp. All require global admin (auth inherited from the parent `/admin/*` middleware + per-route `requireGlobalAdmin`).
+
+#### `GET /admin/llm/capabilities`
+
+```bash
+curl -b cookies.txt http://localhost:7600/admin/llm/capabilities
+```
+
+Returns the active provider's capability map. Used by the dashboard once on page load to decide which controls to render.
+
+```json
+{
+  "provider": "llamacpp",
+  "capabilities": {
+    "canList": true,
+    "canPull": true,
+    "canDelete": true,
+    "canLoad": true,
+    "canUnload": true,
+    "canWarm": false
+  }
+}
+```
+
+#### `GET /admin/llm/active`
+
+Returns the active provider id and its current model label (drives the status-header badge). For Ollama this is `runtime.ollama.model`; for llamacpp it's the manager's loaded model from `/healthz` (cached 5s in the provider).
+
+```json
+{ "provider": "llamacpp", "model": "qwen2.5-7b-instruct.Q4_K_M.gguf" }
+```
+
+Errors degrade to placeholder strings (`(not loaded)`, `(manager unreachable)`, `(manager error 500)`) — this endpoint never returns 5xx because chat must continue working through a degraded badge.
+
+#### `GET /admin/llm/models`
+
+```json
+{
+  "models": [
+    {
+      "name": "qwen2.5-7b-instruct.Q4_K_M.gguf",
+      "size_bytes": 4400000000,
+      "modified_at": "2026-04-29T12:00:00Z",
+      "details": { "parsed": { "arch": "qwen2", "quant": "Q4" }, "is_loaded": true }
+    }
+  ]
+}
+```
+
+#### `POST /admin/llm/load`
+
+```bash
+curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
+  -d '{"filename":"qwen2.5-7b-instruct.Q4_K_M.gguf","ctx_size":8192,"gpu_layers":-1,"parallel_slots":1}' \
+  http://localhost:7600/admin/llm/load
+```
+
+llamacpp only (501 for Ollama which loads on-demand). Returns 200 on success, 404 if filename not found in `models_dir`, 502 if the manager is unreachable, 500 with `stderr_tail` on spawn failure.
+
+#### `POST /admin/llm/unload`
+
+Idempotent. Returns 200 even if nothing was loaded.
+
+#### `POST /admin/llm/restart`
+
+llamacpp only. Re-spawns the currently loaded model with optional ctx_size / gpu_layers / parallel_slots overrides.
+
+```bash
+curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
+  -d '{"ctx_size":4096}' http://localhost:7600/admin/llm/restart
+```
+
+400 if nothing is loaded.
+
+#### `POST /admin/llm/pull`
+
+Provider-aware NDJSON streaming. Body is a discriminated union:
+
+- `{"source":"ollama","name":"gemma3:4b"}` — Ollama only (400 otherwise)
+- `{"source":"url","url":"https://example.com/model.gguf"}` — llamacpp only
+- `{"source":"hf","repo":"owner/repo","file":"model.Q4_K_M.gguf"}` — llamacpp only
+
+Mismatched source/provider returns 400. Streams NDJSON progress frames; terminal frame is `{"status":"success",...}` or `{"status":"error","message":"..."}`.
+
+```bash
+curl -bN -X POST -H 'Content-Type: application/json' \
+  -d '{"source":"hf","repo":"bartowski/gemma-2-2b-it-GGUF","file":"gemma-2-2b-it-Q4_K_M.gguf"}' \
+  http://localhost:7600/admin/llm/pull
+```
+
+#### `DELETE /admin/llm/models/:filename`
+
+```bash
+curl -b cookies.txt -X DELETE http://localhost:7600/admin/llm/models/old-model.gguf
+```
+
+Returns 409 `in_use` if the model is currently loaded (POST `/admin/llm/unload` first), 404 if not found.
+
+---
+
+### LLM Management — Ollama-specific (`/admin/ollama/*`, global admin)
+
+These predate the provider abstraction and remain for backward compatibility. **They return 503 `wrong_provider` when `OB2_LLM_PROVIDER` is not `ollama`** — operators in llamacpp mode should use `/admin/llm/*` instead.
 
 #### `GET /admin/ollama/models`
 

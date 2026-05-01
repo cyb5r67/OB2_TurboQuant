@@ -33,14 +33,20 @@ OB2 is a fully self-hosted retrieval-augmented generation platform. Upload docum
 ## Quick Start
 
 ```bash
-cd /path/to/OB2
+cd /path/to/OB2_TurboQuant
 export OB2_BRAIN_KEY=your-secure-key
 
-# Standard stack (server + pgvector + pgAdmin)
+# Standard stack (server + pgvector + pgAdmin, Ollama on host via host.docker.internal)
 scripts/docker-start.sh
 
 # With Open WebUI chat surface
 scripts/docker-start.sh --with-chat
+
+# With containerized llama.cpp (CUDA-built llama-server + ob2-llamacpp-manager)
+scripts/docker-start.sh --with-llamacpp
+
+# All three (Ollama on host + Open WebUI + llama.cpp container)
+scripts/docker-start.sh --with-chat --with-llamacpp
 
 # Force rebuild after code changes
 scripts/docker-start.sh --build
@@ -54,6 +60,10 @@ scripts/docker-start.sh --build
 | `http://localhost:7600` | Main API (MCP, /v1, /admin) |
 | `http://localhost:7601` | Open WebUI chat (if `--with-chat`) |
 | `http://localhost:5051` | pgAdmin (database) |
+| `ob2-llamacpp:8080` (internal) | llama-server chat (if `--with-llamacpp`) |
+| `ob2-llamacpp:8081` (internal) | manager control plane (if `--with-llamacpp`) |
+
+**For Windows / macOS host-mode** (running the prebuilt turboquant_plus binaries on the host instead of in a container), see [`docs/llamacpp-host-setup.md`](docs/llamacpp-host-setup.md).
 
 **First login:** username `_admin`, password = your `OB2_BRAIN_KEY`. Create a real admin user under the Users tab, then switch to that user.
 
@@ -61,7 +71,7 @@ scripts/docker-start.sh --build
 
 - **Ingestion**: drag-drop upload in dashboard, paste URL, `capture_file` MCP tool, or CLI importers (`csv`, `docs`, `pdf`, `wiki`)
 - **Retrieval**: hybrid TF-IDF + semantic search (configurable `OB2_HYBRID_ALPHA`), multi-domain in one scan, single-domain with `@domain` prefix
-- **Generation**: local Ollama (any model; default `gemma3:4b`), grounded context injection, streaming SSE
+- **Generation**: pluggable LLM provider — Ollama (default, `gemma3:4b`) or llama.cpp / turboquant_plus (`OB2_LLM_PROVIDER=llamacpp`); grounded context injection, streaming SSE; cross-provider classifier supported
 - **Storage**: two-tier default (SQLite write cache → pgvector HNSW), or standalone `sqlite` / `pgvector`
 - **Auth**: argon2id passwords + HMAC session cookies for humans; 128-bit API keys for machines; per-domain ACL for both; brain-key bootstrap + close-down
 - **Upload provenance**: every doc carries `_ob2_uploaded_by` in its metadata; shown in the dashboard and optionally in LLM source annotations
@@ -78,6 +88,10 @@ scripts/docker-start.sh --build
 | [docs/api-reference.md](docs/api-reference.md) | Every HTTP endpoint, MCP tool, and CLI command with `curl` examples |
 | [docs/deployment.md](docs/deployment.md) | Full env-var table, volume layout, scripts, Open WebUI setup, storage/LLM switching |
 | [docs/security.md](docs/security.md) | Threat model, credential handling, SSRF defense, signed URLs, CSP, rate limits, deployment checklist |
+| [docs/llamacpp-architecture.md](docs/llamacpp-architecture.md) | LLM provider abstraction, dual deployment shapes (containerized + host-mode), chat request flow, manager control plane, ASCII diagrams |
+| [docs/llamacpp-host-setup.md](docs/llamacpp-host-setup.md) | Windows/Mac walkthrough for running `llama-server` on the host with the prebuilt turboquant_plus binaries |
+| [docs/llamacpp-version-bump.md](docs/llamacpp-version-bump.md) | Bumping `LLAMA_CPP_REF` in the Dockerfile; smoke-test command; rollback steps |
+| [docs/upgrade-ob2-to-turboquant.md](docs/upgrade-ob2-to-turboquant.md) | One-time data migration runbook for operators upgrading from the pre-Phase-2 `ob2` stack to `ob2_turboquant` |
 
 ## Stack
 
@@ -89,7 +103,9 @@ scripts/docker-start.sh --build
 | Retrieval (opt-in) | Rust sidecar — ONNX Runtime 1.24.4 CUDA 13, same JSON-RPC |
 | Embeddings | `all-MiniLM-L6-v2` (384-dim), CUDA/MPS/CPU auto-detect, auto-batching |
 | Storage | Two-tier: SQLite write cache (151 µs/insert) → pgvector HNSW (2.3 ms query) |
-| Generation | Ollama (any model) via `host.docker.internal` |
+| Generation | Pluggable: Ollama (host or remote) OR llama.cpp + turboquant_plus (containerized via `--with-llamacpp` profile, or host binaries via `host.docker.internal`); selected by `OB2_LLM_PROVIDER` |
+| LLM provider abstraction | `server/llm/{provider,ollama_provider,llamacpp_provider,openai_sse}.ts`; capability flags drive dashboard UI |
+| llamacpp manager | `ob2-llamacpp-manager` Deno service supervises one `llama-server` process; HTTP control plane (load / unload / pull / delete); `.last_loaded.json` restore-on-startup |
 | Auth | Argon2id + HMAC session cookies (humans), 128-bit API keys (machines), per-domain ACL |
 | Chat UI | Open WebUI (optional, `--with-chat`) — SSO + per-user impersonation |
 | Infrastructure | Docker Compose, NVIDIA GPU passthrough |
