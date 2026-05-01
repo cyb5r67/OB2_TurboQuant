@@ -1,5 +1,9 @@
-// Tiny stand-in for llama-server's /v1/chat/completions used by tests/e2e.sh.
-// Speaks just enough OpenAI to validate the chat path.
+// Tiny stand-in for llama-server's /v1/chat/completions used by tests/e2e.sh
+// Step 22 to drive the gateway-to-llamacpp chat path WITHOUT requiring the
+// real ob2-llamacpp-manager. This fixture emits a fixed SSE sequence — it
+// does NOT serve /health, so it cannot be used by the manager's process
+// supervisor; for that, see tests/fixtures/stub-llama-server.ts which serves
+// both /health and /v1/chat/completions.
 //
 // Usage:
 //   deno run --allow-net tests/fixtures/fake-llama-server.ts --port 18080
