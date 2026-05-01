@@ -16,6 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG LLAMA_CPP_REF=b4404
 RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} https://github.com/ggerganov/llama.cpp /src
 WORKDIR /src
+# LIBRARY_PATH points the linker at the CUDA driver stub (libcuda.so) shipped
+# in the cuda:devel image's stubs/ dir. Without this, recent llama.cpp commits
+# fail to link with undefined references to cuMemCreate / cuGetErrorString /
+# etc. (driver API symbols, not runtime). Stub is replaced by the real
+# libcuda.so at runtime via nvidia-container-toolkit.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build --config Release -j --target llama-server
 
