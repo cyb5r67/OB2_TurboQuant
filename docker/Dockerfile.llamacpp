@@ -20,7 +20,7 @@ RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build --config Release -j --target llama-server
 
 # ─── Stage 2: compile the Deno manager into a static binary ───────────────────
-FROM denoland/deno:2.1.4 AS manager-build
+FROM denoland/deno:2.7.12 AS manager-build
 WORKDIR /m
 COPY llamacpp-manager/ ./
 RUN deno cache main.ts \
