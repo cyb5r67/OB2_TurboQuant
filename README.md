@@ -17,6 +17,7 @@ OB2 is a fully self-hosted retrieval-augmented generation platform. Upload docum
 
 ## What's New (since 2026-04-18)
 
+- **LLM provider switch in dashboard** — flip between Ollama and llama-server (turboquant_plus) via the Config tab without restarting. The LLMs tab adapts its controls to the active provider; pull GGUFs from URL or HuggingFace, load/unload, and delete from the UI. Containerized via `scripts/docker-start.sh --with-llamacpp`, or run `llama-server` on Windows/Mac with the prebuilt binaries (see `docs/llamacpp-host-setup.md`).
 - **Multi-format ingestion** — PDFs (text + OCR for scanned), DOCX, PPTX, XLSX, HTML, Markdown, CSV, JSON, audio (Whisper), images, ZIP archives, HTTP URLs, YouTube transcripts — all via MarkItDown + ocrmypdf
 - **Original file persistence + signed download URLs** — every uploaded file stored at `/data/imports/<domain>/<file_id>`; chat citations are clickable links with 24-hour HMAC-signed tokens (no session cookie needed)
 - **Multi-domain retrieval** — prefix-less chats search every domain the caller can read in one pgvector scan, ranked together by cosine similarity
