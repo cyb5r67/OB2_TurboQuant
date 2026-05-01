@@ -379,10 +379,7 @@ LOADERS.domains = async () => {
   try {
     const d = await api('/admin/domains');
     const domains = d.domains || [];
-    // Whether the caller can create domains. We expose +Create only to global
-    // admins, identified by every entry having effective_permission === "admin".
-    // (Empty domain list falls through to the empty-state branch below.)
-    const isAdmin = domains.length > 0 && domains.every((e) => e.effective_permission === 'admin');
+    const isAdmin = !!WHOAMI?.global_admin;
 
     const headerHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
       <span style="color:var(--muted);font-size:0.85rem">${domains.length} domain${domains.length !== 1 ? 's' : ''}</span>
