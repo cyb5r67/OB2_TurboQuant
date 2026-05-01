@@ -1,7 +1,9 @@
-# syntax=docker/dockerfile:1.6
-#
 # ob2-llamacpp container: builds llama.cpp from source (CUDA 12.4) and the
 # Deno-based ob2-llamacpp-manager, then assembles a runtime image.
+#
+# No `# syntax=` directive: we don't use heredocs, --mount, or secrets, so the
+# default BuildKit frontend that ships with Docker Buildx is sufficient. This
+# also avoids a network dependency on the `docker/dockerfile:1.6` image.
 #
 # Bumps to LLAMA_CPP_REF: see docs/llamacpp-version-bump.md.
 
