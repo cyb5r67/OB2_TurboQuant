@@ -309,7 +309,10 @@
         <div style="font-size:0.85rem;color:var(--muted)">Loaded model</div>
         <div id="lc-loaded-model" class="mono" style="font-size:1.1rem;margin:0.25rem 0">…</div>
         <div id="lc-loaded-meta" style="font-size:0.85rem;color:var(--muted)"></div>
-        <!-- Action buttons (load/unload/pull) come in Task 9 -->
+        <div id="lc-loaded-actions" style="margin-top:0.5rem;display:none">
+          <button data-action="lc-restart">Restart with new settings</button>
+          <button class="danger" data-action="lc-unload">Unload</button>
+        </div>
       </div>
 
       <h2 style="margin-top:1rem">Available GGUFs</h2>
@@ -320,10 +323,72 @@
             <th>Size</th>
             <th>Quant</th>
             <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
+      <p style="margin-top:0.75rem">
+        <button data-action="lc-pull-url">+ Pull from URL</button>
+        <button data-action="lc-pull-hf">+ Pull from HuggingFace</button>
+      </p>
+
+      <!-- Load modal -->
+      <div class="modal-bg" id="lc-load-modal" role="dialog" aria-modal="true">
+        <div class="modal">
+          <h3>Load model</h3>
+          <p>Filename: <code id="lc-load-filename"></code></p>
+          <p style="color:var(--yellow);font-size:0.85rem">⚠ This swaps the loaded model. In-flight chat requests will fail.</p>
+          <div style="display:grid;grid-template-columns:max-content 1fr;gap:0.5rem 0.75rem;align-items:center;margin-top:0.5rem">
+            <label for="lc-load-ctx-size">Context size</label>
+            <input id="lc-load-ctx-size" type="number" min="512">
+            <label for="lc-load-gpu-layers">GPU layers (-1 = all)</label>
+            <input id="lc-load-gpu-layers" type="number" min="-1">
+            <label for="lc-load-parallel-slots">Parallel slots</label>
+            <input id="lc-load-parallel-slots" type="number" min="1">
+          </div>
+          <div class="modal-actions">
+            <button class="secondary" data-action="lc-load-cancel">Cancel</button>
+            <button data-action="lc-load-confirm">Load</button>
+          </div>
+          <div id="lc-load-error" style="color:var(--red);font-size:0.85rem;margin-top:0.5rem"></div>
+        </div>
+      </div>
+
+      <!-- Pull-from-URL modal -->
+      <div class="modal-bg" id="lc-pull-url-modal" role="dialog" aria-modal="true">
+        <div class="modal">
+          <h3>Pull from URL</h3>
+          <p style="color:var(--muted);font-size:0.85rem">URL must end in <code>.gguf</code>. Filename is derived from the URL.</p>
+          <input id="lc-pull-url-input" type="url" placeholder="https://example.com/model.gguf" style="width:100%">
+          <progress id="lc-pull-url-progress" max="100" value="0" style="display:none;width:100%;margin-top:0.5rem"></progress>
+          <pre id="lc-pull-url-status" style="font-size:0.78rem;max-height:8em;margin-top:0.5rem;display:none"></pre>
+          <div class="modal-actions">
+            <button class="secondary" data-action="lc-pull-url-close">Close</button>
+            <button data-action="lc-pull-url-start">Pull</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pull-from-HuggingFace modal -->
+      <div class="modal-bg" id="lc-pull-hf-modal" role="dialog" aria-modal="true">
+        <div class="modal">
+          <h3>Pull from HuggingFace</h3>
+          <p style="color:var(--muted);font-size:0.85rem">If <code>OB2_HF_TOKEN</code> is set, gated repos work. Otherwise only public repos.</p>
+          <div style="display:grid;grid-template-columns:max-content 1fr;gap:0.5rem 0.75rem;margin-top:0.5rem">
+            <label for="lc-pull-hf-repo">Repo</label>
+            <input id="lc-pull-hf-repo" type="text" placeholder="bartowski/gemma-2-2b-it-GGUF" style="width:100%">
+            <label for="lc-pull-hf-file">File</label>
+            <input id="lc-pull-hf-file" type="text" placeholder="gemma-2-2b-it-Q4_K_M.gguf" style="width:100%">
+          </div>
+          <progress id="lc-pull-hf-progress" max="100" value="0" style="display:none;width:100%;margin-top:0.5rem"></progress>
+          <pre id="lc-pull-hf-status" style="font-size:0.78rem;max-height:8em;margin-top:0.5rem;display:none"></pre>
+          <div class="modal-actions">
+            <button class="secondary" data-action="lc-pull-hf-close">Close</button>
+            <button data-action="lc-pull-hf-start">Pull</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 

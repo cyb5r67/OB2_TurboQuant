@@ -152,6 +152,25 @@ export function adminLlmRoutes(): Hono<AppEnv> {
     }
   });
 
+  // DELETE /admin/llm/models/:filename — delete a GGUF / Ollama model.
+  // Refused if loaded (manager returns 409, surface that).
+  app.delete("/models/:filename", async (c) => {
+    const adminCheck = requireGlobalAdmin(c);
+    if (adminCheck) return adminCheck;
+    const p = getProvider();
+    if (!p.deleteModel) return c.json({ error: { type: "not_supported", message: `${p.id} does not support delete` } }, 501);
+    const filename = c.req.param("filename");
+    if (!filename) return c.json({ error: { type: "invalid_request_error", message: "filename required" } }, 400);
+    try {
+      await p.deleteModel(filename);
+      return c.json({ ok: true });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const status = msg.includes("in_use") ? 409 : msg.includes("not_found") ? 404 : 500;
+      return c.json({ error: { type: "delete_failed", message: msg } }, status);
+    }
+  });
+
   // POST /admin/llm/restart — llamacpp-only, hits manager /v1/restart with overrides.
   app.post("/restart", async (c) => {
     const denied = requireGlobalAdmin(c);

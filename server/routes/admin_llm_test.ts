@@ -196,6 +196,23 @@ globalThis.fetch = ((input: string | URL | Request) => {
   assert(j.models[0].name === "a.gguf", "first model name");
 }
 
+// Case 11: DELETE /admin/llm/models/:filename hits the manager
+{
+  let calledMethod: string | null = null;
+  let calledUrl: string | null = null;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    calledMethod = init?.method ?? "GET";
+    calledUrl = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (calledMethod === "DELETE" && calledUrl === "http://lc:8081/v1/models/foo.gguf") {
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("404", { status: 404 }));
+  }) as typeof fetch;
+  const r = await app.request("/admin/llm/models/foo.gguf", { method: "DELETE" });
+  assert(r.status === 200, `delete 200 (got ${r.status})`);
+  assert(calledMethod === "DELETE", "delete method propagated");
+}
+
 globalThis.fetch = realFetch;
 await Deno.remove(tmp);
 if (failures > 0) Deno.exit(1);

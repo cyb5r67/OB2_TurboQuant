@@ -1422,13 +1422,15 @@ async function loadOllamaLlmsTab() {
 }
 
 async function loadLlamacppPanel() {
-  // Loaded model
   let active;
   try { active = await api('/admin/llm/active'); }
   catch { active = { model: '(error)' }; }
   document.getElementById('lc-loaded-model').textContent = active.model || '(unknown)';
 
-  // GGUF list
+  // Show actions only if a model is actually loaded (not a placeholder/error string)
+  const isLoaded = active.model && !active.model.startsWith('(');
+  document.getElementById('lc-loaded-actions').style.display = isLoaded ? '' : 'none';
+
   let list;
   try { list = await api('/admin/llm/models'); }
   catch { list = { models: [] }; }
@@ -1439,19 +1441,217 @@ async function loadLlamacppPanel() {
     const tr = document.createElement('tr');
     const sizeMb = (m.size_bytes / (1024 * 1024)).toFixed(1);
     const quant = m.details?.parsed?.quant || '?';
-    const isLoaded = m.details?.is_loaded || false;
+    const rowLoaded = m.details?.is_loaded || false;
+    const safeName = escapeHtml(m.name);
     tr.innerHTML = `
-      <td>${escapeHtml(m.name)}</td>
+      <td>${safeName}</td>
       <td class="mono">${sizeMb} MB</td>
       <td>${escapeHtml(quant)}</td>
-      <td>${isLoaded ? '<span class="badge badge-green">loaded</span>' : '<span class="badge badge-muted">available</span>'}</td>
+      <td>${rowLoaded ? '<span class="badge badge-green">loaded</span>' : '<span class="badge badge-muted">available</span>'}</td>
+      <td>
+        ${rowLoaded
+          ? ''
+          : `<button class="small" data-action="lc-row-load" data-filename="${safeName}">Load</button>
+             <button class="small danger" data-action="lc-row-delete" data-filename="${safeName}">Delete</button>`}
+      </td>
     `;
     tbody.appendChild(tr);
   }
   if ((list.models || []).length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No GGUF files found in the models directory.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">No GGUF files found in the models directory.</td></tr>';
   }
 }
+
+// ──────────────────────────────────────────────────────────────
+// llamacpp write actions: load / unload / restart / pull / delete
+// ──────────────────────────────────────────────────────────────
+
+function lcOpenLoadModal(filename, prefill) {
+  document.getElementById('lc-load-filename').textContent = filename;
+  document.getElementById('lc-load-ctx-size').value = prefill?.ctx_size ?? 8192;
+  document.getElementById('lc-load-gpu-layers').value = prefill?.gpu_layers ?? -1;
+  document.getElementById('lc-load-parallel-slots').value = prefill?.parallel_slots ?? 1;
+  document.getElementById('lc-load-error').textContent = '';
+  document.getElementById('lc-load-modal').classList.add('show');
+}
+
+function lcCloseLoadModal() {
+  document.getElementById('lc-load-modal').classList.remove('show');
+}
+
+async function lcConfirmLoad() {
+  const filename = document.getElementById('lc-load-filename').textContent;
+  const body = {
+    filename,
+    ctx_size: Number(document.getElementById('lc-load-ctx-size').value),
+    gpu_layers: Number(document.getElementById('lc-load-gpu-layers').value),
+    parallel_slots: Number(document.getElementById('lc-load-parallel-slots').value),
+  };
+  try {
+    await api('/admin/llm/load', { method: 'POST', body: JSON.stringify(body) });
+    lcCloseLoadModal();
+    await loadLlamacppPanel();
+    refreshLlmBadge();
+  } catch (e) {
+    document.getElementById('lc-load-error').textContent = 'Load failed: ' + e.message;
+  }
+}
+
+async function lcUnload() {
+  if (!confirm('Unload the current model?')) return;
+  try {
+    await api('/admin/llm/unload', { method: 'POST' });
+    await loadLlamacppPanel();
+    refreshLlmBadge();
+  } catch (e) {
+    alert('Unload failed: ' + e.message);
+  }
+}
+
+async function lcRestart() {
+  // Open the load modal pre-populated with current settings.
+  // We don't know the current ctx_size / gpu_layers from /admin/llm/active alone;
+  // surface the load modal which lets the operator pick. Restart sends the body to
+  // /admin/llm/restart instead of /load.
+  // Since restart reuses the loaded filename, no filename input — we'll repurpose
+  // the load modal but set a flag.
+  const active = document.getElementById('lc-loaded-model').textContent;
+  lcOpenLoadModal(active, { ctx_size: 8192, gpu_layers: -1, parallel_slots: 1 });
+  // Set a flag so lcConfirmLoad knows to call /restart instead of /load.
+  document.getElementById('lc-load-modal').dataset.mode = 'restart';
+}
+
+async function lcDeleteRow(filename) {
+  if (!confirm(`Delete ${filename}? This removes the GGUF from disk.`)) return;
+  try {
+    const r = await fetch(`${BASE}/admin/llm/models/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert('Delete failed: ' + (err.error?.message || r.status));
+      return;
+    }
+    await loadLlamacppPanel();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+async function lcStreamPull(body, progressEl, statusEl) {
+  const r = await fetch(`${BASE}/admin/llm/pull`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok || !r.body) {
+    statusEl.textContent = 'Pull request failed: HTTP ' + r.status;
+    statusEl.style.display = '';
+    return;
+  }
+  progressEl.style.display = '';
+  statusEl.style.display = '';
+  statusEl.textContent = '';
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const p = JSON.parse(line);
+        statusEl.textContent += JSON.stringify(p) + '\n';
+        statusEl.scrollTop = statusEl.scrollHeight;
+        if (typeof p.total === 'number' && p.total > 0 && typeof p.completed === 'number') {
+          progressEl.value = (p.completed / p.total) * 100;
+        }
+      } catch { /* skip malformed line */ }
+    }
+  }
+  await loadLlamacppPanel();
+}
+
+// Delegated click handler on the LLMs tab. Hooks every action button by data-action.
+document.getElementById('tab-llms').addEventListener('click', async (e) => {
+  const action = e.target?.dataset?.action;
+  if (!action) return;
+  const filename = e.target.dataset.filename;
+  if (action === 'lc-row-load') {
+    lcOpenLoadModal(filename);
+    document.getElementById('lc-load-modal').dataset.mode = 'load';
+  } else if (action === 'lc-row-delete') {
+    await lcDeleteRow(filename);
+  } else if (action === 'lc-load-cancel') {
+    lcCloseLoadModal();
+  } else if (action === 'lc-load-confirm') {
+    const mode = document.getElementById('lc-load-modal').dataset.mode || 'load';
+    if (mode === 'restart') {
+      const body = {
+        ctx_size: Number(document.getElementById('lc-load-ctx-size').value),
+        gpu_layers: Number(document.getElementById('lc-load-gpu-layers').value),
+        parallel_slots: Number(document.getElementById('lc-load-parallel-slots').value),
+      };
+      try {
+        await api('/admin/llm/restart', { method: 'POST', body: JSON.stringify(body) });
+        lcCloseLoadModal();
+        await loadLlamacppPanel();
+        refreshLlmBadge();
+      } catch (err) {
+        document.getElementById('lc-load-error').textContent = 'Restart failed: ' + err.message;
+      }
+    } else {
+      await lcConfirmLoad();
+    }
+  } else if (action === 'lc-unload') {
+    await lcUnload();
+  } else if (action === 'lc-restart') {
+    await lcRestart();
+  } else if (action === 'lc-pull-url') {
+    document.getElementById('lc-pull-url-input').value = '';
+    document.getElementById('lc-pull-url-progress').style.display = 'none';
+    document.getElementById('lc-pull-url-progress').value = 0;
+    document.getElementById('lc-pull-url-status').style.display = 'none';
+    document.getElementById('lc-pull-url-status').textContent = '';
+    document.getElementById('lc-pull-url-modal').classList.add('show');
+  } else if (action === 'lc-pull-url-close') {
+    document.getElementById('lc-pull-url-modal').classList.remove('show');
+  } else if (action === 'lc-pull-url-start') {
+    const url = document.getElementById('lc-pull-url-input').value.trim();
+    if (!url) { alert('URL required'); return; }
+    await lcStreamPull(
+      { source: 'url', url },
+      document.getElementById('lc-pull-url-progress'),
+      document.getElementById('lc-pull-url-status'),
+    );
+  } else if (action === 'lc-pull-hf') {
+    document.getElementById('lc-pull-hf-repo').value = '';
+    document.getElementById('lc-pull-hf-file').value = '';
+    document.getElementById('lc-pull-hf-progress').style.display = 'none';
+    document.getElementById('lc-pull-hf-progress').value = 0;
+    document.getElementById('lc-pull-hf-status').style.display = 'none';
+    document.getElementById('lc-pull-hf-status').textContent = '';
+    document.getElementById('lc-pull-hf-modal').classList.add('show');
+  } else if (action === 'lc-pull-hf-close') {
+    document.getElementById('lc-pull-hf-modal').classList.remove('show');
+  } else if (action === 'lc-pull-hf-start') {
+    const repo = document.getElementById('lc-pull-hf-repo').value.trim();
+    const file = document.getElementById('lc-pull-hf-file').value.trim();
+    if (!repo || !file) { alert('Repo and file required'); return; }
+    await lcStreamPull(
+      { source: 'hf', repo, file },
+      document.getElementById('lc-pull-hf-progress'),
+      document.getElementById('lc-pull-hf-status'),
+    );
+  }
+});
 
 async function renderLlmTab() {
   try {
