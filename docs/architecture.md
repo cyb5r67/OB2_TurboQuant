@@ -4,73 +4,45 @@ OB2 is a self-hosted personal RAG platform. Users log in to a web dashboard, upl
 
 ## System Overview
 
-```
-+-----------------------------------------------------------------------+
-|  Clients                                                              |
-|                                                                       |
-|  Browser            Claude Code / Cursor      Any OpenAI-compat       |
-|  (dashboard)        (MCP protocol)            client (/v1 API)        |
-+------+------------------+----------------------------+---------+------+
-       |                  |                            |         |
-       | HTTP             | x-brain-key                | Bearer  |
-       |                  |                            |         |
-       v                  v                            v         |
-+------+------------------+----------------------------+---------+------+
-|  ob2-server  (Deno + Hono)                                            |
-|                                                                       |
-|  Port 7600 (main)                      Port 7601 (Open WebUI proxy)   |
-|  +------+  +------+  +-------+         +--------------------------+   |
-|  | /mcp |  | /v1  |  |/admin |         | openwebui reverse proxy  |   |
-|  | MCP  |  |  GW  |  |  +    |         | SSO cookie + header      |   |
-|  | tools|  | chat |  |/dash  |         | injection                |   |
-|  +--+---+  +--+---+  +---+---+         +----------+---------------+   |
-|     |         |          |                         |                   |
-|     +----+----+          |                         |                   |
-|          |               |                         |                   |
-|  +-------+--------+      |                         |                   |
-|  | Auth middleware |      |                         |                   |
-|  | bearerAuthMulti |      |                         |                   |
-|  | users.json      |      |                         |                   |
-|  | brain-key gate  |      |                         |                   |
-|  +-------+--------+      |                         |                   |
-|          |               |                         |                   |
-|  +-------v--------+      |                         |                   |
-|  | sidecar.ts     |      |                         |                   |
-|  | JSON-RPC client|      |                         |                   |
-|  +-------+--------+      |                         |                   |
-|          |               |                         |                   |
-+----------+---------------+-------------------------+---------+---------+
-           |                                         |         |
-      stdin/stdout                               HTTP proxy  SSO token
-           |                                         |         |
-+----------v----------+                    +---------v---------+
-| Retrieval Sidecar   |                    | ob2-openwebui     |
-| (Python default or  |                    | (Open WebUI chat) |
-|  Rust opt-in)       |                    | port 8080         |
-| - MarkItDown ingest |                    | (optional profile)|
-| - embeddings        |                    +-------------------+
-| - storage ops       |
-+----------+----------+
-           |
-    +------+------+
-    |             |
-+---v---+    +---v-----+
-|SQLite |    |pgvector  |
-|write  |<-->|query     |
-|cache  | SW |store     |
-|(Tier1)|    |(Tier 2)  |
-+-------+    +---------+
-                  |
-           +------v------+
-           | LLM provider |
-           | (configurable)|
-           | ollama / llamacpp / |
-           | openai / anthropic / |
-           | gemini       |
-           +-------------+
+```mermaid
+graph TB
+    subgraph clients["Clients"]
+        browser["Browser<br/>(dashboard)"]
+        claude["Claude Code / Cursor<br/>(MCP protocol)"]
+        oai["Any OpenAI-compat<br/>client (/v1 API)"]
+    end
+
+    subgraph server["ob2-server (Deno + Hono)"]
+        direction TB
+        subgraph routes["Routes"]
+            mcp["/mcp<br/>MCP tools"]
+            v1["/v1<br/>GW chat"]
+            admin["/admin<br/>+ /dashboard"]
+            owproxy[":7601<br/>Open WebUI<br/>reverse proxy"]
+        end
+        auth["Auth middleware<br/>bearerAuthMulti<br/>users.json · brain-key gate"]
+        scts["sidecar.ts<br/>JSON-RPC client"]
+        mcp & v1 & admin --> auth --> scts
+    end
+
+    subgraph storage["Storage"]
+        sqlite["SQLite<br/>write cache<br/>(Tier 1)"]
+        pgvec["pgvector<br/>query store<br/>(Tier 2)"]
+        sqlite <-->|SyncWorker<br/>5s · 256 docs| pgvec
+    end
+
+    sidecar["Retrieval Sidecar<br/>Python default or Rust opt-in<br/>MarkItDown · embeddings · storage ops"]
+    owui["ob2-openwebui<br/>(Open WebUI chat)<br/>port 8080<br/>(optional profile)"]
+    llm["LLM provider (configurable)<br/>ollama · llamacpp · openai · anthropic · gemini"]
+
+    browser & claude & oai -->|HTTP / x-brain-key / Bearer| server
+    scts -->|stdin/stdout| sidecar
+    owproxy -->|HTTP proxy + SSO token| owui
+    sidecar --> storage
+    pgvec --> llm
 ```
 
-**SW** = SyncWorker (background, every 5 s, 256-doc batches)
+**SyncWorker** runs in the background, syncing every 5 s in 256-doc batches.
 
 ## Component Responsibilities
 
@@ -136,77 +108,50 @@ Measured on RTX 5090 (Blackwell): cold start 0.36 s (12.9x faster), RSS 687 MB w
 
 ### Ingestion Pipeline
 
-```
-User drag-drops a file (or pastes a URL) on the Domains tab
-           |
-           v
-POST /admin/domains/:domain/import  (multipart/form-data)
-           |
-    +------+------+
-    |              |
- magic-byte      URL fetcher
-  sniffer       (SSRF denylist:
- (detect ext)    DNS-resolve +
-                 CIDR check)
-    |              |
-    +---------+----+
-              |
-    Persist original bytes
-    /data/imports/<domain>/<file_id>.<ext>
-    (ob2_data volume)
-              |
-    +---------v---------+
-    |   size / type?    |
-    |                   |
-  < 25 MB +         >= 25 MB or audio/ZIP
-  Office file           |
-    |                async job queue
-    |                (jobs.ts, disk-persisted)
-    |                /data/import-jobs.json
-    |                poll GET .../jobs/:id
-    |                  |
-    +------+-----------+
-           |
-           v
-  Python sidecar: method_convert_to_markdown
-  (MarkItDown + OCR fallback)
-           |
-           v
-  Markdown chunker (header-aware, overlap)
-           |
-           v
-  EmbedBatcher -> GPU -> 384-dim vectors
-           |
-           v
-  StorageBackend.upsert_docs_batch
-  (SQLite write cache, then SyncWorker -> pgvector)
-           |
-           v
-  Chunk metadata: _ob2_import_file_id, _ob2_import_filename, _ob2_uploaded_by
-  (enables "download original" citations and uploader attribution)
+```mermaid
+flowchart TD
+    user["User drag-drops a file<br/>(or pastes URL) on Domains tab"]
+    post["POST /admin/domains/:domain/import<br/>(multipart/form-data)"]
+    sniff["Magic-byte sniffer<br/>(detect ext)"]
+    urlfetch["URL fetcher<br/>SSRF denylist: DNS-resolve + CIDR check"]
+    persist["Persist original bytes<br/>/data/imports/&lt;domain&gt;/&lt;file_id&gt;.&lt;ext&gt;<br/>(ob2_data volume)"]
+    decide{"size / type?"}
+    sync["Sync path<br/>&lt; 25 MB · Office file"]
+    async["Async job queue<br/>jobs.ts, disk-persisted<br/>/data/import-jobs.json<br/>poll GET .../jobs/:id"]
+    convert["Python sidecar:<br/>method_convert_to_markdown<br/>(MarkItDown + OCR fallback)"]
+    chunk["Markdown chunker<br/>(header-aware, overlap)"]
+    embed["EmbedBatcher → GPU<br/>384-dim vectors"]
+    store["StorageBackend.upsert_docs_batch<br/>SQLite write cache → SyncWorker → pgvector"]
+    meta["Chunk metadata:<br/>_ob2_import_file_id, _ob2_import_filename,<br/>_ob2_uploaded_by<br/>(enables download-original citations + attribution)"]
+
+    user --> post
+    post --> sniff & urlfetch
+    sniff --> persist
+    urlfetch --> persist
+    persist --> decide
+    decide -->|small/Office| sync
+    decide -->|large/audio/ZIP| async
+    sync --> convert
+    async --> convert
+    convert --> chunk --> embed --> store --> meta
 ```
 
 ### Two-Tier Storage
 
-```
-  Capture / Ingest
-        |
-        v
-  SQLite (Tier 1)          reads always try pgvector first;
-  /data/ob2.db             fall back to SQLite if unreachable
-  151 µs / insert
-        |
-        | every 5 s or 256 docs
-        | (SyncWorker, background)
-        |
-        v
-  pgvector (Tier 2)
-  ob2-postgres:5432
-  HNSW cosine index
-  2.3 ms query
-        |
-        v
-  Reads: query_similar -> ranked hits
+```mermaid
+flowchart TD
+    capture["Capture / Ingest"]
+    sqlite["SQLite (Tier 1)<br/>/data/ob2.db<br/>151 µs / insert"]
+    sync["SyncWorker<br/>every 5 s or 256 docs<br/>(background)"]
+    pgvec["pgvector (Tier 2)<br/>ob2-postgres:5432<br/>HNSW cosine index<br/>2.3 ms query"]
+    reads["Reads:<br/>query_similar → ranked hits"]
+    fallback["Reads always try pgvector first;<br/>fall back to SQLite if unreachable"]
+
+    capture --> sqlite
+    sqlite --> sync --> pgvec
+    pgvec --> reads
+    reads -.->|fallback| sqlite
+    fallback -.->|policy| reads
 ```
 
 Storage mode is set by `OB2_STORAGE_BACKEND`:
@@ -225,102 +170,96 @@ The classifier code remains in-tree (`routes/classifier.ts`) but is no longer us
 
 ### Auth Architecture
 
-```
-Incoming request
-      |
-      +--- ob2_session cookie present?
-      |         |
-      |         +-- Yes --> HMAC verify + session lookup
-      |         |               |
-      |         |             Valid?
-      |         |            /     \
-      |         |          Yes      No
-      |         |           |        \
-      |         +-- No --> x-brain-key / Authorization: Bearer
-      |                          |
-      |              +--------+--+--+------------+
-      |              |        |     |            |
-      |          user API   brain  service     unknown
-      |           key       key    token
-      |              |        |     |            |
-      |          UserRecord  _admin UserRecord  401
-      |          (from       global (no password
-      |          users.json) admin  required)
-      |
-      +--- Per-domain ACL check
-                 |
-          read / write / admin / global_admin
+```mermaid
+flowchart TD
+    req["Incoming request"]
+    cookie{"ob2_session<br/>cookie present?"}
+    hmac["HMAC verify + session lookup"]
+    valid{"Valid?"}
+    fallback["x-brain-key /<br/>Authorization: Bearer"]
+    keytype{"Key type?"}
+    userkey["User API key<br/>→ UserRecord<br/>(from users.json)"]
+    brainkey["Brain key<br/>→ _admin global"]
+    svctoken["Service token<br/>→ UserRecord<br/>(no password required)"]
+    unknown["Unknown<br/>→ 401"]
+    acl["Per-domain ACL check<br/>read / write / admin / global_admin"]
+
+    req --> cookie
+    cookie -->|Yes| hmac --> valid
+    valid -->|Yes| acl
+    valid -->|No| fallback
+    cookie -->|No| fallback
+    fallback --> keytype
+    keytype --> userkey & brainkey & svctoken & unknown
+    userkey & brainkey & svctoken --> acl
 ```
 
 **Service-token impersonation** (for Open WebUI): when the `Authorization: Bearer` value matches `OB2_OPENWEBUI_SERVICE_TOKEN`, the server checks `X-OpenWebUI-User-Name` (set by Open WebUI's `ENABLE_FORWARD_USER_INFO_HEADERS`). If that header names a valid, enabled OB2 user, the request proceeds as that user with their full per-domain ACL. Without the header, the caller gets a `service_only` context (can list models, cannot chat).
 
 ### Open WebUI Integration
 
-```
-  Browser (user clicks "Chat" in dashboard)
-        |
-        v
-  GET /auth/openwebui-handoff  (requires OB2 session cookie)
-        |
-  1-minute HMAC handoff token issued
-        |
-        v
-  Browser redirected to :7601/?sso=<token>
-        |
-  Proxy verifies token, issues 12-hour SSO cookie (ob2_sso),
-  strips client-side headers (X-Forwarded-*, X-OB2-*, etc.),
-  sets X-Forwarded-Email on every upstream request
-        |
-        v
-  ob2-openwebui:8080  (Open WebUI, BYPASS_MODEL_ACCESS_CONTROL=true)
-        |
-  User chats; Open WebUI sends:
-  POST http://ob2-server:7600/v1/chat/completions
-    Authorization: Bearer <OB2_OPENWEBUI_SERVICE_TOKEN>
-    X-OpenWebUI-User-Name: <username>
-    body: {model: "ob2", messages: [...]}
-        |
-  OB2 gateway: service token + username header -> impersonate user
-  Multi-domain retrieval -> augmented context -> Ollama -> response
-  Response includes signed citation URLs (24 h TTL)
-        |
-  Open WebUI renders message with clickable source links
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as ob2-server :7600
+    participant P as Proxy :7601
+    participant W as ob2-openwebui :8080
+
+    B->>S: GET /auth/openwebui-handoff<br/>(OB2 session cookie)
+    S-->>B: 1-min HMAC handoff token
+    B->>P: redirect :7601/?sso=&lt;token&gt;
+    P->>P: verify token, issue 12h SSO cookie<br/>strip X-Forwarded-* / X-OB2-*<br/>inject X-Forwarded-Email
+    P->>W: GET / (with header)
+    W-->>B: Open WebUI loaded (BYPASS_MODEL_ACCESS_CONTROL=true)
+    B->>W: user chats
+    W->>S: POST /v1/chat/completions<br/>Authorization: Bearer SERVICE_TOKEN<br/>X-OpenWebUI-User-Name: alice
+    S->>S: impersonate user · multi-domain<br/>retrieval · augment · LLM
+    S-->>W: response with signed citation URLs (24h TTL)
+    W-->>B: render message with clickable source links
 ```
 
 ## Containers and Ports
 
-```
-+---------------------------+  +---------------------------+
-|  ob2-server               |  |  ob2-openwebui (optional) |
-|  (Deno + Python/Rust SC)  |  |  profile: openwebui        |
-|                           |  |                           |
-|  :7600 main API           |  |  :8080 (internal only)    |
-|  :7601 Open WebUI proxy   |  |                           |
-|  volume: ob2_data /data   |  |  volume: ob2_openwebui_   |
-|    - ob2.db               |  |          data             |
-|    - users.json           |  +---------------------------+
-|    - config.yaml          |
-|    - import-jobs.json     |  +---------------------------+
-|    - imports/<domain>/    |  |  ob2-postgres             |
-|                           |  |  pgvector/pgvector:pg17   |
-+---------------------------+  |  :5433 (host) :5432 (ctr) |
-                               |  volume: ob2_pgdata        |
-+---------------------------+  +---------------------------+
-|  ob2-pgadmin (optional)   |
-|  dpage/pgadmin4           |  +---------------------------+
-|  :5051 (host) :80 (ctr)   |  |  ob2-llamacpp (optional)  |
-+---------------------------+  |  profile: llamacpp         |
-                               |                           |
-Host machine:                  |  ob2-llamacpp-manager     |
-Ollama :11434                  |  :8081 (internal)         |
-(accessed as                   |  llama-server             |
-host.docker.internal)          |  :8080 (internal)         |
-                               |                           |
-                               |  volume: llamacpp_models  |
-                               |  GPU passthrough (NVIDIA) |
-                               |  TurboQuant fork          |
-                               |  --cache-prompt active    |
-                               +---------------------------+
+```mermaid
+graph TB
+    subgraph host["Host machine"]
+        ollama["Ollama :11434<br/>(host.docker.internal)"]
+    end
+
+    subgraph compose["Docker Compose — ob2_turboquant"]
+        srv["ob2-server<br/>(Deno + Python/Rust sidecar)<br/>:7600 main API · :7601 OW proxy<br/>volume: ob2_data /data"]
+        pg["ob2-postgres<br/>pgvector/pgvector:pg17<br/>:5433 host → :5432 ctr<br/>volume: ob2_pgdata"]
+        pgadmin["ob2-pgadmin (optional)<br/>dpage/pgadmin4<br/>:5051 host → :80 ctr"]
+
+        subgraph llprof["profile: llamacpp"]
+            llmgr["ob2-llamacpp-manager :8081 (internal)"]
+            llsrv["llama-server :8080 (internal)<br/>TurboQuant fork · --cache-prompt"]
+            llmodels["volume: llamacpp_models"]
+            gpu["NVIDIA GPU passthrough"]
+            llmgr --> llsrv
+            llsrv --- llmodels
+            llsrv --- gpu
+        end
+
+        subgraph owprof["profile: openwebui"]
+            owui["ob2-openwebui<br/>:8080 (internal only)<br/>volume: ob2_openwebui_data"]
+        end
+
+        srv --- pg
+        srv -.-> ollama
+        srv --> llmgr
+        srv --> owui
+    end
+
+    subgraph data["ob2_data volume contents"]
+        d1["ob2.db"]
+        d2["users.json"]
+        d3["config.yaml"]
+        d4["import-jobs.json"]
+        d5["imports/&lt;domain&gt;/"]
+    end
+
+    srv -.- d1 & d2 & d3 & d4 & d5
 ```
 
 ## Dashboard Tabs
