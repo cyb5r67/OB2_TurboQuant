@@ -90,7 +90,8 @@ app.use("*", async (c, next) => {
     "Content-Security-Policy",
     "default-src 'self'; " +
       "script-src 'self'; " +
-      "style-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
       "img-src 'self' data:; " +
       "connect-src 'self'; " +
       "frame-ancestors 'none'; " +
@@ -168,6 +169,14 @@ app.get("/graph.js", async (c) => {
   c.header("Content-Type", "application/javascript; charset=utf-8");
   c.header("Cache-Control", "no-store, must-revalidate");
   return c.body(js);
+});
+
+// Brand logo for the dashboard header.
+app.get("/logo.png", async (c) => {
+  const data = await Deno.readFile(new URL("./static/logo.png", import.meta.url).pathname);
+  c.header("Content-Type", "image/png");
+  c.header("Cache-Control", "public, max-age=86400");
+  return c.body(data);
 });
 
 // Vendored static assets (cytoscape.js for the LLMs/Graph viz). One file at
