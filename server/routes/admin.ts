@@ -1320,8 +1320,10 @@ export function adminRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
     const domain = c.req.param("domain");
     const denied = requirePerm(c, domain, "admin");
     if (denied) return denied;
+    const body = await c.req.json().catch(() => ({})) as { force?: boolean };
+    const force = body.force === true;
     try {
-      const r = await sidecar.call("graph_backfill_start", { domain });
+      const r = await sidecar.call("graph_backfill_start", { domain, force });
       return c.json(r, 201);
     } catch (err) {
       return c.json({ error: safeError(err, "backfill start failed") }, 500);

@@ -30,7 +30,8 @@ RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.
 # image on Pascal/Volta/Turing/Ampere hardware.
 RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CUDA_ARCHITECTURES="89;120" \
- && cmake --build build --config Release -j --target llama-server
+        -DBUILD_SHARED_LIBS=OFF \
+ && cmake --build build --config Release -j6 --target llama-server
 
 # ─── Stage 2: compile the Deno manager into a static binary ───────────────────
 FROM denoland/deno:2.7.12 AS manager-build
@@ -45,9 +46,18 @@ RUN deno cache main.ts \
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libcurl4 tini curl \
+    libgomp1 libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=llama-build   /src/build/bin/llama-server /usr/local/bin/llama-server
+# Copy shared libraries built alongside llama-server (e.g. libmtmd.so.0).
+# Only the runtime stage ships; build artifacts are not re-compiled here.
+# -DBUILD_SHARED_LIBS=OFF (already set in the cmake step) eliminates these on
+# the next full rebuild — this COPY is a safety net for cached builds.
+COPY --from=llama-build   /src/build/bin/ /tmp/llama-libs/
+RUN find /tmp/llama-libs -name "*.so*" -exec cp -P {} /usr/local/lib/ \; \
+    && ldconfig \
+    && rm -rf /tmp/llama-libs
 COPY --from=manager-build /out/ob2-llamacpp-manager   /usr/local/bin/ob2-llamacpp-manager
 
 ENV OB2_LLAMACPP_MODELS_DIR=/data/llamacpp/models \

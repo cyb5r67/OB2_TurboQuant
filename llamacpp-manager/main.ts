@@ -18,6 +18,7 @@ const VERSION = "0.1.0-phase2";
 const STARTED_AT = Date.now();
 
 const managerPort = Number(Deno.env.get("OB2_LLAMACPP_MANAGER_PORT") || "8081");
+const healthTimeoutMs = Number(Deno.env.get("OB2_LLAMACPP_HEALTH_TIMEOUT_MS") || "300000");
 const modelsDir = Deno.env.get("OB2_LLAMACPP_MODELS_DIR") || "/data/llamacpp/models";
 const chatPort = Number(Deno.env.get("OB2_LLAMACPP_CHAT_PORT") || "8080");
 const llamaBinary = Deno.env.get("OB2_LLAMA_SERVER_BIN") || "/usr/local/bin/llama-server";
@@ -98,7 +99,7 @@ app.post("/v1/load", async (c) => {
     }
     await supervisor.spawn({ filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v });
     try {
-      await supervisor.awaitHealth(60_000);
+      await supervisor.awaitHealth(healthTimeoutMs);
     } catch (err) {
       await supervisor.kill();
       throw err;
@@ -172,7 +173,7 @@ app.post("/v1/restart", async (c) => {
     if (supervisor.getState().running) await supervisor.kill();
     await supervisor.spawn({ filename: cur.filename, ctx_size, gpu_layers, parallel_slots, cache_type_k, cache_type_v });
     try {
-      await supervisor.awaitHealth(60_000);
+      await supervisor.awaitHealth(healthTimeoutMs);
     } catch (err) {
       await supervisor.kill();
       throw err;

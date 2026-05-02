@@ -164,8 +164,8 @@ async function augmentWithContext(
   // SOURCE IDS list — that used to leak opaque doc_ids which Gemma would
   // mangle into fake "test numbers" etc. Citations are just [N].
   const systemContent = [
-    "Answer using the SOURCES below as ground truth. If the sources don't",
-    "contain the answer, say you don't know.",
+    "Answer using the SOURCES below when they are relevant. If the sources don't",
+    "contain the answer, use your general knowledge to help the user.",
     "",
     "Each source block looks like:",
     "    [N] source=@<domain>",
@@ -298,12 +298,14 @@ export function gatewayRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
       }
       try {
         const query = lastUserQuery(resolvedMsgs);
+        const t0 = Date.now();
         const ctx = await sidecar.call<SidecarContextResult>("build_context", {
           domain,
           query,
-          budget_tokens: 6000,
+          budget_tokens: getRuntime().retrieval.total_token_budget,
           show_uploader_in_context: getRuntime().context.show_uploader_in_context,
         });
+        console.log(`retrieval domain=${domain} took ${Date.now() - t0}ms, chunks=${ctx.chunks?.length ?? 0}`);
         messagesForModel = await augmentWithContext(resolvedMsgs, ctx);
       } catch (err) {
         // If retrieval fails, fall back to pass-through rather than error out
@@ -350,12 +352,14 @@ export function gatewayRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
       const query = lastUserQuery(resolvedMsgs);
       if (query && candidates.length > 0) {
         try {
+          const t0 = Date.now();
           const ctx = await sidecar.call<SidecarContextResult>("build_multi_context", {
             domains: candidates,
             query,
-            budget_tokens: 6000,  // see note above @ build_context call
+            budget_tokens: getRuntime().retrieval.total_token_budget,
             show_uploader_in_context: getRuntime().context.show_uploader_in_context,
           });
+          console.log(`retrieval multi-domain took ${Date.now() - t0}ms, chunks=${ctx.chunks?.length ?? 0}`);
           if (ctx.compressed_text && ctx.compressed_text.length > 0) {
             messagesForModel = await augmentWithContext(resolvedMsgs, ctx);
           }

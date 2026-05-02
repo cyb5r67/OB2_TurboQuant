@@ -94,6 +94,11 @@ services:
       # sidecar keep working. Generate the service token once with:
       #   deno run --allow-env --allow-write \
       #     server/scripts/openwebui-init.ts
+      # llamacpp provider — points ob2-server at the ob2-llamacpp sidecar.
+      # Uses the Docker service name so resolution works on the internal network.
+      OB2_LLAMACPP_MANAGER_URL: http://ob2-llamacpp:8081
+      OB2_LLAMACPP_CHAT_URL: http://ob2-llamacpp:8080
+      OB2_LLAMACPP_MANAGER_TOKEN: ${OB2_LLAMACPP_MANAGER_TOKEN:-}
       OB2_OPENWEBUI_ENABLED: ${OB2_OPENWEBUI_ENABLED:-false}
       OB2_OPENWEBUI_UPSTREAM: ${OB2_OPENWEBUI_UPSTREAM:-http://ob2-openwebui:8080}
       OB2_OPENWEBUI_SERVICE_TOKEN: ${OB2_OPENWEBUI_SERVICE_TOKEN:-}
@@ -243,6 +248,7 @@ services:
       OB2_LLAMACPP_PARALLEL_SLOTS: ${OB2_LLAMACPP_PARALLEL_SLOTS:-1}
       OB2_LLAMACPP_CACHE_TYPE_K: ${OB2_LLAMACPP_CACHE_TYPE_K:-turbo3}
       OB2_LLAMACPP_CACHE_TYPE_V: ${OB2_LLAMACPP_CACHE_TYPE_V:-turbo3}
+      OB2_LLAMACPP_HEALTH_TIMEOUT_MS: ${OB2_LLAMACPP_HEALTH_TIMEOUT_MS:-300000}
     volumes:
       - llamacpp_models:/data/llamacpp/models
     deploy:

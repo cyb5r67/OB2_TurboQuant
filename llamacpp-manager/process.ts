@@ -61,6 +61,7 @@ export class LlamaSupervisor {
       "--n-gpu-layers", String(opts.gpu_layers),
       "--parallel", String(opts.parallel_slots),
       "--host", "0.0.0.0",
+      "--cache-prompt",
       ...(opts.cache_type_k ? ["--cache-type-k", opts.cache_type_k] : []),
       ...(opts.cache_type_v ? ["--cache-type-v", opts.cache_type_v] : []),
     ];

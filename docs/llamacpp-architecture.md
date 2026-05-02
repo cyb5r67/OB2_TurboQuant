@@ -360,6 +360,84 @@ docs/
 └── upgrade-ob2-to-turboquant.md     stack-rename data migration
 ```
 
+## TurboQuant KV cache compression
+
+TurboQuant is a 2026 Google DeepMind KV-cache compression algorithm integrated into the TheTom/llama-cpp-turboquant fork. It compresses attention key/value cache entries to ~3 bits per value, enabling:
+
+- **Larger effective context** for the same VRAM budget
+- **Faster generation** through reduced memory bandwidth pressure
+- **Negligible accuracy loss** vs uncompressed fp16 KV cache
+
+OB2 activates TurboQuant by passing `--cache-type-k turbo3 --cache-type-v turbo3` to llama-server at load time. These are controlled by the `OB2_LLAMACPP_CACHE_TYPE_K` / `OB2_LLAMACPP_CACHE_TYPE_V` env vars (default: `turbo3`). Available levels: `turbo2_0`, `turbo3_0`, `turbo4_0` (higher = more compression, more loss).
+
+**Important:** TurboQuant applies to the KV cache only — not to model weights. Any standard GGUF model (Q4_K_M, Q8_0, etc.) automatically benefits from TurboQuant KV compression when loaded via ob2-llamacpp.
+
+## Prompt caching (KV cache reuse between turns)
+
+llama-server is launched with `--cache-prompt`, which enables cross-request KV cache reuse. When consecutive requests share a common prefix (system prompt + prior conversation history), llama-server reuses the already-computed KV entries. Effect:
+
+- **First message in a conversation:** full prefill over system prompt + user message
+- **Subsequent messages:** only the new tokens are prefilled; prefix is served from cache
+
+This is combined with TurboQuant so the cached KV entries are also compressed in VRAM.
+
+## Docker build — static linking
+
+The `Dockerfile.llamacpp` cmake step includes `-DBUILD_SHARED_LIBS=OFF` to statically link all llama.cpp libraries into the `llama-server` binary. This means:
+
+- No runtime `.so` dependencies to copy between build and runtime stages
+- Simpler, smaller runtime image
+- No `libmtmd.so.0` / `libgomp.so.1` missing-library errors on future builds
+
+The runtime stage still installs `libgomp1 libstdc++6` for any remaining system-level OpenMP / C++ dependencies that can't be statically linked.
+
+## Health timeout
+
+Large models (20+ GB) can take 2–5 minutes to load into GPU VRAM. The manager's `awaitHealth()` timeout is configurable via `OB2_LLAMACPP_HEALTH_TIMEOUT_MS` (default: `300000` ms / 5 minutes). Set this higher if loading very large models on slower storage.
+
+## New admin endpoint: GET /admin/llm/loaded
+
+`GET /admin/llm/loaded` returns the currently loaded model's runtime details:
+
+```json
+{
+  "loaded": {
+    "filename": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "port": 8080,
+    "started_at": "2026-05-01T10:23:45Z"
+  }
+}
+```
+
+Returns `{ "loaded": null }` when no model is loaded. Used by the dashboard to populate the "Loaded model" card with port and load time.
+
+## Graph extraction — provider-aware
+
+The Knowledge Graph entity extractor (`retrieval/sidecar.py`) previously called Ollama's `/api/chat` directly regardless of the configured LLM provider. It now dispatches based on `llm.provider`:
+
+| Provider | Extraction endpoint | Format |
+|---|---|---|
+| `ollama` | `{OLLAMA_URL}/api/chat` | Ollama NDJSON with `format: "json"` |
+| `llamacpp` | `{LLAMACPP_CHAT_URL}/v1/chat/completions` | OpenAI-compatible with `response_format: json_object` |
+
+**Qwen3 thinking mode:** Qwen3 models output chain-of-thought reasoning into a `reasoning_content` field before the actual answer in `content`. The extractor handles this with:
+1. `/no_think` in the system prompt to suppress thinking via the chat template
+2. A `<think>…</think>` strip regex as a fallback
+3. JSON extraction from `reasoning_content` if `content` is empty (triggered by token-limit mid-think)
+4. `json.JSONDecoder().raw_decode()` to tolerate trailing text after the JSON object
+
+## Graph backfill — resume and force re-extract
+
+The backfill job (`method_graph_backfill_start`) now supports two modes:
+
+**Normal backfill (default):** skips docs already stamped with `_ob2_graph_extracted_at`. A restarted or interrupted backfill resumes from where it left off — no repeated work.
+
+**Force re-extract:** `POST /admin/domains/:domain/graph/backfill` with body `{ "force": true }` re-extracts all docs regardless of prior extraction stamp. The dashboard exposes this as a **"Force re-extract all"** button with a confirmation prompt.
+
+## RAG pipeline — budget_tokens fix
+
+`server/routes/gateway.ts` previously hardcoded `budget_tokens: 6000` when calling the sidecar, ignoring `retrieval.total_token_budget` from runtime config. This has been fixed to read from `getRuntime().retrieval.total_token_budget` (default: 2048). The hardcoded value caused 3× more context than configured to be sent to the LLM on every chat request, inflating prefill time.
+
 ## See also
 
 - **Specs and plans:** `docs/superpowers/specs/2026-04-30-llamacpp-provider-design.md` and `docs/superpowers/plans/2026-04-30-llamacpp-phase{1,2,3}-*.md` — the design that produced this implementation.

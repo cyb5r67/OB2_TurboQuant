@@ -248,7 +248,8 @@ async function api(path, opts = {}) {
   }
   if (!r.ok) {
     const e = await r.json().catch(() => ({ error: r.statusText }));
-    throw new Error(e.error || r.statusText);
+    const msg = typeof e.error === 'string' ? e.error : (e.error?.message || r.statusText);
+    throw new Error(msg);
   }
   return await r.json();
 }
@@ -1424,16 +1425,39 @@ async function loadLlamacppPanel() {
   catch { active = { model: '(error)' }; }
   document.getElementById('lc-loaded-model').textContent = active.model || '(unknown)';
 
-  // Show actions only if a model is actually loaded (not a placeholder/error string)
   const isLoaded = active.model && !active.model.startsWith('(');
   document.getElementById('lc-loaded-actions').style.display = isLoaded ? '' : 'none';
 
+  const metaEl = document.getElementById('lc-loaded-meta');
+  metaEl.textContent = '';
+  if (isLoaded) {
+    try {
+      const loaded = await api('/admin/llm/loaded');
+      if (loaded.loaded) {
+        const parts = [];
+        if (loaded.loaded.port) parts.push(`port ${loaded.loaded.port}`);
+        if (loaded.loaded.started_at) {
+          const mins = Math.round((Date.now() - new Date(loaded.loaded.started_at).getTime()) / 60000);
+          parts.push(mins < 1 ? 'just loaded' : `loaded ${mins} min ago`);
+        }
+        metaEl.textContent = parts.join(' · ');
+      }
+    } catch { /* leave blank */ }
+  }
+
   let list;
+  let listError = false;
   try { list = await api('/admin/llm/models'); }
-  catch { list = { models: [] }; }
+  catch { list = { models: [] }; listError = true; }
 
   const tbody = document.querySelector('#llamacpp-models-table tbody');
   tbody.innerHTML = '';
+
+  if (listError) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--red)">⚠ Manager unreachable — check ob2-llamacpp container</td></tr>';
+    return;
+  }
+
   for (const m of (list.models || [])) {
     const tr = document.createElement('tr');
     const sizeMb = (m.size_bytes / (1024 * 1024)).toFixed(1);
@@ -1469,6 +1493,9 @@ function lcOpenLoadModal(filename, prefill) {
   document.getElementById('lc-load-gpu-layers').value = prefill?.gpu_layers ?? -1;
   document.getElementById('lc-load-parallel-slots').value = prefill?.parallel_slots ?? 1;
   document.getElementById('lc-load-error').textContent = '';
+  document.getElementById('lc-load-modal-title').textContent = 'Load model';
+  document.getElementById('lc-load-modal-warning').style.display = '';
+  document.getElementById('lc-load-confirm-btn').textContent = 'Load';
   document.getElementById('lc-load-modal').classList.add('show');
 }
 
@@ -1484,6 +1511,9 @@ async function lcConfirmLoad() {
     gpu_layers: Number(document.getElementById('lc-load-gpu-layers').value),
     parallel_slots: Number(document.getElementById('lc-load-parallel-slots').value),
   };
+  const btn = document.getElementById('lc-load-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
   try {
     await api('/admin/llm/load', { method: 'POST', body: JSON.stringify(body) });
     lcCloseLoadModal();
@@ -1491,30 +1521,31 @@ async function lcConfirmLoad() {
     refreshLlmBadge();
   } catch (e) {
     document.getElementById('lc-load-error').textContent = 'Load failed: ' + e.message;
+    btn.disabled = false;
+    btn.textContent = 'Load';
   }
 }
 
 async function lcUnload() {
   if (!confirm('Unload the current model?')) return;
+  const btn = document.querySelector('[data-action="lc-unload"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Unloading…'; }
   try {
     await api('/admin/llm/unload', { method: 'POST' });
     await loadLlamacppPanel();
     refreshLlmBadge();
   } catch (e) {
     alert('Unload failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Unload'; }
   }
 }
 
-async function lcRestart() {
-  // Open the load modal pre-populated with current settings.
-  // We don't know the current ctx_size / gpu_layers from /admin/llm/active alone;
-  // surface the load modal which lets the operator pick. Restart sends the body to
-  // /admin/llm/restart instead of /load.
-  // Since restart reuses the loaded filename, no filename input — we'll repurpose
-  // the load modal but set a flag.
+function lcRestart() {
   const active = document.getElementById('lc-loaded-model').textContent;
   lcOpenLoadModal(active, { ctx_size: 8192, gpu_layers: -1, parallel_slots: 1 });
-  // Set a flag so lcConfirmLoad knows to call /restart instead of /load.
+  document.getElementById('lc-load-modal-title').textContent = 'Restart with new settings';
+  document.getElementById('lc-load-modal-warning').style.display = 'none';
+  document.getElementById('lc-load-confirm-btn').textContent = 'Restart';
   document.getElementById('lc-load-modal').dataset.mode = 'restart';
 }
 
@@ -1550,7 +1581,7 @@ async function lcStreamPull(body, progressEl, statusEl) {
   }
   progressEl.style.display = '';
   statusEl.style.display = '';
-  statusEl.textContent = '';
+  statusEl.textContent = 'Starting…';
   const reader = r.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
@@ -1565,10 +1596,17 @@ async function lcStreamPull(body, progressEl, statusEl) {
       if (!line) continue;
       try {
         const p = JSON.parse(line);
-        statusEl.textContent += JSON.stringify(p) + '\n';
-        statusEl.scrollTop = statusEl.scrollHeight;
-        if (typeof p.total === 'number' && p.total > 0 && typeof p.completed === 'number') {
-          progressEl.value = (p.completed / p.total) * 100;
+        if (p.status === 'downloading' && typeof p.total === 'number' && p.total > 0) {
+          const pct = Math.round((p.completed / p.total) * 100);
+          progressEl.value = pct;
+          statusEl.textContent = `Downloading… ${formatBytes(p.completed)} / ${formatBytes(p.total)} (${pct}%)`;
+        } else if (p.status === 'success') {
+          progressEl.value = 100;
+          statusEl.textContent = `✓ Done — ${formatBytes(p.completed ?? p.total)}`;
+        } else if (p.status === 'error') {
+          statusEl.textContent = `✗ Error: ${p.message || 'unknown error'}`;
+        } else if (p.status) {
+          statusEl.textContent = p.status;
         }
       } catch { /* skip malformed line */ }
     }
@@ -1596,6 +1634,9 @@ document.getElementById('tab-llms').addEventListener('click', async (e) => {
         gpu_layers: Number(document.getElementById('lc-load-gpu-layers').value),
         parallel_slots: Number(document.getElementById('lc-load-parallel-slots').value),
       };
+      const btn = document.getElementById('lc-load-confirm-btn');
+      btn.disabled = true;
+      btn.textContent = 'Restarting…';
       try {
         await api('/admin/llm/restart', { method: 'POST', body: JSON.stringify(body) });
         lcCloseLoadModal();
@@ -1603,6 +1644,8 @@ document.getElementById('tab-llms').addEventListener('click', async (e) => {
         refreshLlmBadge();
       } catch (err) {
         document.getElementById('lc-load-error').textContent = 'Restart failed: ' + err.message;
+        btn.disabled = false;
+        btn.textContent = 'Restart';
       }
     } else {
       await lcConfirmLoad();
@@ -1936,10 +1979,10 @@ async function renderGraphTab() {
 
   // Backfill is admin-on-domain only. Hide it for read/write users so the
   // UI doesn't dangle a button that would 403.
-  const backfillBtn = document.querySelector('[data-action="start-graph-backfill"]');
-  if (backfillBtn) {
-    const perm = permByDomain.get(sel.value) || '';
-    backfillBtn.style.display = perm === 'admin' ? '' : 'none';
+  const perm = permByDomain.get(sel.value) || '';
+  for (const action of ['start-graph-backfill', 'start-graph-backfill-force']) {
+    const btn = document.querySelector(`[data-action="${action}"]`);
+    if (btn) btn.style.display = perm === 'admin' ? '' : 'none';
   }
 
   // Keep full-screen and GEXF export links in sync with the selected domain.
@@ -1993,6 +2036,7 @@ async function renderDomainGraph(domain) {
     return;
   }
 
+  const entityIds = new Set(entities.map((e) => e.entity_id));
   const elements = [
     ...entities.map((e) => ({
       data: {
@@ -2003,15 +2047,17 @@ async function renderDomainGraph(domain) {
         domain,
       },
     })),
-    ...edges.map((ed, i) => ({
-      data: {
-        id: `e${i}`,
-        source: ed.src_id,
-        target: ed.dst_id,
-        relation: ed.relation,
-        weight: ed.weight,
-      },
-    })),
+    ...edges
+      .filter((ed) => entityIds.has(ed.src_id) && entityIds.has(ed.dst_id))
+      .map((ed, i) => ({
+        data: {
+          id: `e${i}`,
+          source: ed.src_id,
+          target: ed.dst_id,
+          relation: ed.relation,
+          weight: ed.weight,
+        },
+      })),
   ];
 
   buildCytoscape(elements, { layout: 'cose' });
@@ -2202,14 +2248,15 @@ async function reloadGraph() {
   await renderGraphTab();
 }
 
-async function startGraphBackfill() {
+async function startGraphBackfill(force = false) {
   const domain = document.getElementById('graph-domain-select').value;
   if (!domain) return;
+  if (force && !confirm(`Force re-extract ALL docs in @${domain}? This re-runs extraction on already-processed documents.`)) return;
   const status = document.getElementById('graph-backfill-status');
-  status.textContent = `Starting backfill for @${domain}…`;
+  status.textContent = force ? `Force re-extracting all docs in @${domain}…` : `Starting backfill for @${domain}…`;
   status.style.color = 'var(--muted)';
   try {
-    const job = await api(`/admin/domains/${encodeURIComponent(domain)}/graph/backfill`, { method: 'POST' });
+    const job = await api(`/admin/domains/${encodeURIComponent(domain)}/graph/backfill`, { method: 'POST', body: JSON.stringify({ force }) });
     const jobId = job.id;
     status.textContent = `Backfill running (${job.message || 'queued'})…`;
     if (_graphBackfillPoller) clearInterval(_graphBackfillPoller);
@@ -2420,10 +2467,39 @@ async function loadProviderSettings() {
   document.getElementById('lc-manager-url').value = lc.manager_url || '';
   document.getElementById('lc-chat-url').value = lc.chat_url || '';
   document.getElementById('lc-models-dir').value = lc.models_dir || '';
-  document.getElementById('lc-default-model').value = lc.default_model || '';
   document.getElementById('lc-ctx-size').value = lc.ctx_size ?? 8192;
   document.getElementById('lc-gpu-layers').value = lc.gpu_layers ?? -1;
   document.getElementById('lc-parallel-slots').value = lc.parallel_slots ?? 1;
+
+  const sel = document.getElementById('lc-default-model');
+  const currentDefault = lc.default_model || '';
+  sel.innerHTML = '<option value="">— none —</option>';
+  if (provider === 'llamacpp') {
+    try {
+      const modelsData = await api('/admin/llm/models');
+      for (const m of (modelsData.models || [])) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = m.name;
+        if (m.name === currentDefault) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    } catch {
+      if (currentDefault) {
+        const opt = document.createElement('option');
+        opt.value = currentDefault;
+        opt.textContent = currentDefault;
+        opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+  } else if (currentDefault) {
+    const opt = document.createElement('option');
+    opt.value = currentDefault;
+    opt.textContent = currentDefault;
+    opt.selected = true;
+    sel.appendChild(opt);
+  }
 }
 
 async function loadClassifierSettings() {
@@ -2486,7 +2562,8 @@ async function _putRuntimeConfigPatch(patch) {
   }
   if (!r.ok) {
     const e = await r.json().catch(() => ({ error: r.statusText }));
-    throw new Error(e.error || r.statusText);
+    const msg = typeof e.error === 'string' ? e.error : (e.error?.message || r.statusText);
+    throw new Error(msg);
   }
   return await r.json();
 }
@@ -2958,7 +3035,8 @@ document.addEventListener('click', (e) => {
 
     // ── Graph ──
     case 'reload-graph': return reloadGraph();
-    case 'start-graph-backfill': return startGraphBackfill();
+    case 'start-graph-backfill': return startGraphBackfill(false);
+    case 'start-graph-backfill-force': return startGraphBackfill(true);
     case 'delete-domain': return deleteDomain(el.dataset.domain);
     case 'confirm-delete-domain': return confirmDeleteDomain(el.dataset.domain);
     case 'open-manage-domain':

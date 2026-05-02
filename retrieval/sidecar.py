@@ -1508,6 +1508,7 @@ def method_suggest_domains(params: dict) -> dict:
 VALID_ENTITY_TYPES = {"PERSON", "ORG", "PLACE", "PRODUCT", "EVENT", "CONCEPT", "OTHER"}
 RUNTIME_CONFIG_PATH = os.environ.get("OB2_RUNTIME_CONFIG_PATH", "/data/config.yaml")
 OLLAMA_URL = os.environ.get("OB2_OLLAMA_URL", "http://localhost:11434")
+LLAMACPP_CHAT_URL = os.environ.get("OB2_LLAMACPP_CHAT_URL", "http://localhost:8080")
 
 _graph_cfg_cache: dict[str, Any] = {}
 _graph_cfg_mtime: float = 0.0
@@ -1534,6 +1535,8 @@ def _read_graph_config() -> dict[str, Any]:
         "extraction_model": _env("OB2_GRAPH_EXTRACTION_MODEL", ""),
         "rerank_alpha": float(_env("OB2_GRAPH_RERANK_ALPHA", "0.3")),
         "ollama_model": _env("OB2_OLLAMA_MODEL", ""),
+        "provider": _env("OB2_LLM_PROVIDER", "ollama"),
+        "llamacpp_chat_url": _env("OB2_LLAMACPP_CHAT_URL", LLAMACPP_CHAT_URL),
     }
     try:
         st = os.stat(RUNTIME_CONFIG_PATH)
@@ -1548,12 +1551,16 @@ def _read_graph_config() -> dict[str, Any]:
                 data = yaml.safe_load(f) or {}
             graph = data.get("graph", {}) or {}
             ollama = data.get("ollama", {}) or {}
+            llm = data.get("llm", {}) or {}
+            llamacpp = data.get("llamacpp", {}) or {}
             cfg = {
                 "enabled": bool(graph.get("enabled", defaults["enabled"])),
                 "extraction_enabled": bool(graph.get("extraction_enabled", defaults["extraction_enabled"])),
                 "extraction_model": str(graph.get("extraction_model") or defaults["extraction_model"]),
                 "rerank_alpha": float(graph.get("rerank_alpha", defaults["rerank_alpha"])),
                 "ollama_model": str(ollama.get("model") or defaults["ollama_model"]),
+                "provider": str(llm.get("provider") or defaults["provider"]),
+                "llamacpp_chat_url": str(llamacpp.get("chat_url") or defaults["llamacpp_chat_url"]),
             }
             # Env vars win over file (mirrors runtime_config.ts precedence).
             for k, env in [
@@ -1563,7 +1570,12 @@ def _read_graph_config() -> dict[str, Any]:
                 v = os.environ.get(env, "").strip()
                 if v:
                     cfg[k] = v.lower() in ("true", "1")
-            for k, env in [("extraction_model", "OB2_GRAPH_EXTRACTION_MODEL"), ("ollama_model", "OB2_OLLAMA_MODEL")]:
+            for k, env in [
+                ("extraction_model", "OB2_GRAPH_EXTRACTION_MODEL"),
+                ("ollama_model", "OB2_OLLAMA_MODEL"),
+                ("provider", "OB2_LLM_PROVIDER"),
+                ("llamacpp_chat_url", "OB2_LLAMACPP_CHAT_URL"),
+            ]:
                 v = os.environ.get(env, "").strip()
                 if v:
                     cfg[k] = v
@@ -1644,6 +1656,63 @@ def _ollama_extract(model: str, text: str, timeout: float = 60.0) -> dict[str, A
     return json.loads(content)
 
 
+def _openai_extract(chat_url: str, text: str, timeout: float = 120.0) -> dict[str, Any]:
+    """Call an OpenAI-compatible /v1/chat/completions endpoint and return parsed JSON.
+    Used for llamacpp (and any other OpenAI-compatible provider).
+    /no_think in the system prompt disables Qwen3 chain-of-thought via the chat template.
+    max_tokens is set high so thinking doesn't exhaust the budget before the JSON answer.
+    """
+    payload = {
+        "model": "any",
+        "messages": [
+            {"role": "system", "content": "/no_think Output only valid JSON. No thinking, no prose, no markdown fences."},
+            {"role": "user", "content": _GRAPH_PROMPT.replace("{text}", text)},
+        ],
+        "stream": False,
+        "response_format": {"type": "json_object"},
+        "temperature": 0,
+        "max_tokens": 6144,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{chat_url.rstrip('/')}/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+    obj = json.loads(raw)
+    msg = obj.get("choices", [{}])[0].get("message", {})
+    content = msg.get("content") or ""
+    # Strip any <think>...</think> blocks that slip through.
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    if not content:
+        # Qwen3 thinking mode: llama-server splits response — thinking in reasoning_content,
+        # answer in content. If content is empty (model hit token limit mid-think or thinking
+        # mode is active), try to extract the last complete JSON object from reasoning_content.
+        reasoning = msg.get("reasoning_content") or ""
+        # Find all {...} blocks and return the last one that parses as valid JSON.
+        for m in reversed(list(re.finditer(r'\{[\s\S]*?\}(?=\s*$|\s*\n)', reasoning))):
+            try:
+                json.loads(m.group(0))
+                content = m.group(0)
+                break
+            except ValueError:
+                continue
+        if not content:
+            # Last resort: find the outermost {...} block
+            m = re.search(r'\{[\s\S]*\}', reasoning)
+            if m:
+                content = m.group(0)
+    if not content:
+        log(f"graph: openai_extract got empty content, raw response: {raw[:500]}")
+        raise ValueError("LLM returned empty content")
+    # Use raw_decode to take the first valid JSON object and ignore trailing text.
+    obj_out, _ = json.JSONDecoder().raw_decode(content.strip())
+    return obj_out
+
+
 def method_extract_entities(params: dict) -> dict:
     """Extract entities + relationships from a doc, persist into the graph tables.
 
@@ -1658,15 +1727,19 @@ def method_extract_entities(params: dict) -> dict:
                 "edge_count": 0, "skipped": "empty_text"}
 
     cfg = _read_graph_config()
+    provider = cfg.get("provider", "ollama")
     model = (params.get("model") or cfg.get("extraction_model") or cfg.get("ollama_model") or "").strip()
-    if not model:
+    if provider != "llamacpp" and not model:
         return {"ok": False, "error": "no_model_configured"}
 
     # Wipe stale mentions first so re-extraction is idempotent.
     _backend.delete_doc_graph(domain, doc_id)
 
     try:
-        result = _ollama_extract(model, text)
+        if provider == "llamacpp":
+            result = _openai_extract(cfg.get("llamacpp_chat_url", LLAMACPP_CHAT_URL), text)
+        else:
+            result = _ollama_extract(model, text)
     except Exception as e:
         log(f"graph: extraction failed for {domain}/{doc_id}: {type(e).__name__}: {e}")
         return {"ok": False, "error": "extraction_failed", "detail": str(e)}
@@ -1893,17 +1966,20 @@ _backfill_jobs: dict[str, dict] = {}
 _backfill_lock = threading.Lock()
 
 
-def _backfill_run(job_id: str, domain: str) -> None:
+def _backfill_run(job_id: str, domain: str, force: bool = False) -> None:
     job = _backfill_jobs[job_id]
     try:
-        # Pull every user doc (skip system seeds) that hasn't been extracted yet.
+        # Pull every user doc that hasn't been extracted yet.
+        # Skip system seeds and (unless force=True) docs already stamped with
+        # _ob2_graph_extracted_at so a restarted backfill resumes from where it
+        # left off rather than redoing completed work.
         all_docs = _backend.list_docs(domain, limit=1_000_000)
         targets = [
             d for d in all_docs
-            if not (isinstance(d.metadata, dict) and d.metadata.get("_ob2_system"))
+            if isinstance(d.metadata, dict)
+            and not d.metadata.get("_ob2_system")
+            and (force or not d.metadata.get("_ob2_graph_extracted_at"))
         ]
-        # Already-extracted docs can be retried — we'll re-run extraction for everything
-        # to keep the API simple (delete_doc_graph runs first inside method_extract_entities).
         job["total_docs"] = len(targets)
         job["status"] = "running"
         job["message"] = f"extracting {len(targets)} docs"
@@ -1933,17 +2009,20 @@ def _backfill_run(job_id: str, domain: str) -> None:
 
 def method_graph_backfill_start(params: dict) -> dict:
     domain = params["domain"]
-    # If a backfill for this domain is already running, return that one.
+    force = bool(params.get("force", False))
+    # If a non-forced backfill for this domain is already running, return that one.
+    if not force:
+        with _backfill_lock:
+            for j in _backfill_jobs.values():
+                if j["domain"] == domain and j["status"] in ("pending", "running"):
+                    return j
     with _backfill_lock:
-        for j in _backfill_jobs.values():
-            if j["domain"] == domain and j["status"] in ("pending", "running"):
-                return j
         job_id = f"bf-{int(time.time() * 1000):x}-{os.urandom(3).hex()}"
         job = {
             "id": job_id,
             "domain": domain,
             "status": "pending",
-            "message": "queued",
+            "message": "queued (force re-extract)" if force else "queued",
             "total_docs": 0,
             "completed_docs": 0,
             "percent": 0,
@@ -1953,7 +2032,7 @@ def method_graph_backfill_start(params: dict) -> dict:
             "_cancel": False,
         }
         _backfill_jobs[job_id] = job
-    threading.Thread(target=_backfill_run, args=(job_id, domain), name=f"backfill-{job_id}", daemon=True).start()
+    threading.Thread(target=_backfill_run, args=(job_id, domain, force), name=f"backfill-{job_id}", daemon=True).start()
     return {k: v for k, v in job.items() if not k.startswith("_")}
 
 

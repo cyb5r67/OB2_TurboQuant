@@ -45,6 +45,21 @@ export function adminLlmRoutes(): Hono<AppEnv> {
     return c.json({ provider: p.id, model });
   });
 
+  // GET /admin/llm/loaded — details of the currently loaded model (port, started_at).
+  // Only meaningful for llamacpp; other providers return { loaded: null }.
+  app.get("/loaded", async (c) => {
+    const p = getProvider();
+    if (!p.listLoaded) return c.json({ loaded: null });
+    try {
+      const entries = await p.listLoaded();
+      const first = entries[0] ?? null;
+      if (!first) return c.json({ loaded: null });
+      return c.json({ loaded: { filename: first.name, ...(first.details as Record<string, unknown>) } });
+    } catch {
+      return c.json({ loaded: null });
+    }
+  });
+
   // POST /admin/llm/load — load a model on the active provider.
   // Llamacpp: proxies to manager /v1/load. Ollama: NotSupported (501).
   app.post("/load", async (c) => {

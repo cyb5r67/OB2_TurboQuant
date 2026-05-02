@@ -336,9 +336,9 @@
       <!-- Load modal -->
       <div class="modal-bg" id="lc-load-modal" role="dialog" aria-modal="true">
         <div class="modal">
-          <h3>Load model</h3>
+          <h3 id="lc-load-modal-title">Load model</h3>
           <p>Filename: <code id="lc-load-filename"></code></p>
-          <p style="color:var(--yellow);font-size:0.85rem">⚠ This swaps the loaded model. In-flight chat requests will fail.</p>
+          <p id="lc-load-modal-warning" style="color:var(--yellow);font-size:0.85rem">⚠ This swaps the loaded model. In-flight chat requests will fail.</p>
           <div style="display:grid;grid-template-columns:max-content 1fr;gap:0.5rem 0.75rem;align-items:center;margin-top:0.5rem">
             <label for="lc-load-ctx-size">Context size</label>
             <input id="lc-load-ctx-size" type="number" min="512">
@@ -349,7 +349,7 @@
           </div>
           <div class="modal-actions">
             <button class="secondary" data-action="lc-load-cancel">Cancel</button>
-            <button data-action="lc-load-confirm">Load</button>
+            <button id="lc-load-confirm-btn" data-action="lc-load-confirm">Load</button>
           </div>
           <div id="lc-load-error" style="color:var(--red);font-size:0.85rem;margin-top:0.5rem"></div>
         </div>
@@ -420,6 +420,7 @@
         <select id="graph-domain-select" style="min-width:200px"></select>
         <button class="small" data-action="reload-graph">Reload</button>
         <button class="small secondary" data-action="start-graph-backfill">Backfill</button>
+        <button class="small secondary" data-action="start-graph-backfill-force" style="margin-left:0.4rem">Force re-extract all</button>
         <a id="graph-fullscreen-link" href="/graph" target="_blank" rel="noopener"
            class="small secondary" style="padding:0.3rem 0.6rem;font-size:0.75rem;background:var(--border);color:var(--text);border-radius:6px;text-decoration:none;white-space:nowrap;display:inline-block;font-weight:600">Open full-screen ↗</a>
         <a id="graph-gexf-link" href="#" download
@@ -480,7 +481,7 @@
           <input id="lc-models-dir" type="text" readonly style="width:100%;color:var(--muted)">
 
           <label for="lc-default-model">Default model</label>
-          <input id="lc-default-model" type="text" placeholder="e.g. qwen2.5-7b-instruct.Q4_K_M.gguf" style="width:100%">
+          <select id="lc-default-model" style="width:100%"></select>
 
           <label for="lc-ctx-size">Context size</label>
           <input id="lc-ctx-size" type="number" min="512" style="width:100%">

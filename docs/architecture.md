@@ -307,9 +307,20 @@ Incoming request
                                |  volume: ob2_pgdata        |
 +---------------------------+  +---------------------------+
 |  ob2-pgadmin (optional)   |
-|  dpage/pgadmin4           |  Host machine:
-|  :5051 (host) :80 (ctr)   |  Ollama :11434
-+---------------------------+  (accessed as host.docker.internal)
+|  dpage/pgadmin4           |  +---------------------------+
+|  :5051 (host) :80 (ctr)   |  |  ob2-llamacpp (optional)  |
++---------------------------+  |  profile: llamacpp         |
+                               |                           |
+Host machine:                  |  ob2-llamacpp-manager     |
+Ollama :11434                  |  :8081 (internal)         |
+(accessed as                   |  llama-server             |
+host.docker.internal)          |  :8080 (internal)         |
+                               |                           |
+                               |  volume: llamacpp_models  |
+                               |  GPU passthrough (NVIDIA) |
+                               |  TurboQuant fork          |
+                               |  --cache-prompt active    |
+                               +---------------------------+
 ```
 
 ## Dashboard Tabs
