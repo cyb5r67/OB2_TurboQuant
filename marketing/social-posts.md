@@ -1,206 +1,228 @@
-# OB2 Social Media Posts
+# OB2 TurboQuant — Social Media Posts
 
 ---
 
 ## LinkedIn
 
-### Post 1: Launch
+### Post 1: Launch — TurboQuant
 
-**Your documents. Your hardware. Answers that cite their sources.**
+**Run a 35B LLM on a consumer GPU. With KV-cache compressed to 3 bits. Fully local. $0/query.**
 
-We just shipped a major update to OB2 — a fully self-hosted RAG platform.
+We just shipped OB2 TurboQuant — and the headline feature is Google DeepMind's TurboQuant KV-cache compression algorithm baked directly into our llama.cpp fork.
 
-What it does now:
-- Uploads any format: PDFs (including scanned docs — OCR built in), Word, PowerPoint, audio files, ZIP archives, URLs
-- Answers questions grounded in your documents, with clickable links to the original files
-- Multi-user with per-domain access control: your team's medical records don't mix with their HR files
-- Optional Open WebUI chat interface — one flag, SSO from the dashboard
-- Runs entirely on your hardware. Nothing leaves your network. $0/query.
+What TurboQuant means in practice:
+- A 20 GB Qwen3.6-35B-A3B GGUF model runs entirely on a single RTX GPU
+- The context window (conversation history + retrieved documents) is compressed to ~3 bits per value — negligible accuracy loss
+- Follow-up messages in a conversation process only new tokens (`--cache-prompt`), not the whole history from scratch
 
-The clickable citations are the part I'm most proud of. Every answer includes a link to the original document that justified it. Works for 24 hours without requiring a login. Click to see the actual PDF or Word doc.
+Combined with OB2's RAG pipeline:
+- Documents indexed in your pgvector knowledge base
+- Hybrid semantic + TF-IDF + Knowledge Graph retrieval
+- Answers with clickable citations to original files
 
-If you work with sensitive documents — legal filings, service records, clinical protocols, financial data — this is what self-hosted RAG actually looks like.
+Pull any GGUF from HuggingFace in the dashboard UI. No CLI. No `docker exec`. Progress bar shows download in human-readable GB/s.
 
-Apache-2.0. Five minutes to start. Link in comments.
+Apache-2.0. Runs in Docker. Nothing leaves your network.
 
-#AI #RAG #Privacy #OpenSource #DocumentManagement
-
----
-
-### Post 2: Ingestion
-
-**Your DD214 doesn't belong to OpenAI.**
-
-Veterans have mountains of paperwork: DD214s, service treatment records, VA correspondence. All of it relevant when filing a claim or an appeal. Most of it scanned at weird angles on someone's home printer.
-
-OB2 reads scanned PDFs. It OCRs them with the Tesseract LSTM model at 300 DPI — deskew, rotation correction, the works. Then it indexes them locally so you can ask questions:
-
-"Which letters from the VA reference my hearing loss claim?"
-"What was my unit during my 2004 deployment?"
-
-Answers with citations. Click to see the original document. Nothing sent to any server you don't control.
-
-This is a real use case for a real population of people. OCR and original file storage existed in OB2 for this reason.
+#AI #LLM #RAG #Privacy #OpenSource #LocalAI
 
 ---
 
-### Post 3: Multi-user access control
+### Post 2: Knowledge Graph
 
-**Multi-user RAG that actually respects access boundaries.**
+**What if your RAG system knew that "NIST SP 800-53" is related to "AC-2" and "IA-5" — and used that to find better answers?**
 
-The problem with "just give everyone access to the knowledge base" is that not all knowledge belongs to everyone.
+OB2 TurboQuant now ships a Knowledge Graph. Every document you ingest feeds an async entity extractor that pulls:
+- Named entities: people, orgs, places, products, events, concepts
+- Relationships between them
 
-OB2's per-domain ACL:
-- Legal team gets read access to @legal-matter-2024
-- HR gets write access to @hr-policy
-- Security gets admin on @netsec
-- Everyone can search @company-handbook
+When you ask a question, retrieval is graph-augmented: chunks near mentioned entities in the relationship graph get boosted alongside standard semantic ranking.
 
-Same ACL whether you're using the dashboard, Claude Code, or any OpenAI-compatible client.
+The result: answers that are contextually richer, not just lexically similar to your query.
 
-New user? Send an invite link (7-day expiry, single-use). They set their password, they're in. Their access is exactly what you granted.
+From the Graph tab you can:
+✓ Explore the entity graph interactively (Cytoscape.js)
+✓ Click any node to see which documents mention it
+✓ Export to GEXF for Gephi
+✓ Run backfill on existing documents (resumes if interrupted)
 
-This is the boring security infrastructure that makes a knowledge platform trustworthy.
+#AI #KnowledgeGraph #RAG #EntityExtraction #OpenSource
 
 ---
 
-### Post 4: OB2 vs cloud RAG
+### Post 3: GGUF model management
 
-**OB2 vs cloud RAG — what you're actually choosing between:**
+**You shouldn't need a terminal to swap your local LLM.**
+
+OB2 TurboQuant's dashboard LLMs tab now gives you full GGUF model management:
+
+- Pull from HuggingFace: type a repo + filename, watch the download progress
+- Load: one click, button shows "Loading…" during startup
+- Loaded model card: filename, port, how long ago it loaded
+- Restart with new settings: adjust context size and GPU layers from the UI
+- Unload: free VRAM instantly
+- Default model: dropdown of installed GGUFs, auto-loaded on restart
+
+No CLI. No `docker exec`. No editing config files.
+
+The manager health check timeout is configurable for large models — loading 20 GB into GPU VRAM takes time.
+
+---
+
+### Post 4: Five providers, one interface
+
+**Your RAG pipeline shouldn't be locked to one LLM vendor.**
+
+OB2 TurboQuant supports five providers, all switchable from the dashboard Config tab — no restart required:
+
+🖥️ **llamacpp** — TurboQuant GGUF. Fully local. Recommended.
+🦙 **Ollama** — any model on a local Ollama instance
+🤖 **OpenAI** — GPT-4.1, o3, or any OpenAI-compatible endpoint
+🧠 **Anthropic** — Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5
+💎 **Gemini** — Gemini 2.5 Pro / 2.0 Flash
+
+Chat and classification can run on different providers. Common pattern: 35B llamacpp model for chat, small Ollama model for fast query routing.
+
+Same retrieval pipeline regardless of which LLM is active.
+
+---
+
+### Post 5: OB2 vs cloud RAG (updated)
+
+**OB2 TurboQuant vs cloud RAG — what you're actually choosing between:**
 
 Cloud RAG:
 - Upload your documents to their servers
 - Pay per embedding, per query
 - Lose access when you stop paying
-- Hope they don't breach
+- No control over which model processes your data
 
-OB2:
+OB2 TurboQuant:
 - Documents stay on your hardware
-- $0 per query (local Ollama + local GPU)
+- $0 per query (TurboQuant-compressed GGUF, no API costs)
 - You own the data, the index, and the model
-- Apache-2.0, fork it if you want
+- Knowledge Graph built from your documents
+- Apache-2.0 — fork it, modify it, white-label it
 
-For documents you'd be uncomfortable sending to a third party — medical records, legal files, classified procedures, financial data — OB2 is the option that doesn't require you to trust someone else.
-
-Five minutes to start: `scripts/docker-start.sh --with-chat`
+For documents you'd be uncomfortable sending to a third party: medical records, legal files, classified procedures, financial data.
 
 ---
 
 ## Twitter / X
 
-### Tweet 1: Hook
+### Tweet 1: TurboQuant
 
-Just shipped: OB2 can now ingest scanned PDFs (OCR built in), audio files (Whisper transcription), Word/Excel/PowerPoint, ZIPs, URLs.
+Google DeepMind's TurboQuant KV-cache compression is now built into OB2.
 
-You ask a question, it cites the source with a clickable link to the original file.
+3-bit KV cache. 35B MoE model in 20 GB VRAM. Follow-up messages process only new tokens (--cache-prompt).
 
-Everything on your hardware. $0/query. Apache-2.0.
-
----
-
-### Tweet 2: Citation links
-
-The new feature in OB2 I'm most excited about: clickable citation links in every chat response.
-
-Not "according to document X." An actual link to the original PDF or Word file. Works for 24 hours without requiring a login.
-
-You can share a source link with a colleague. They click it, they see the document.
+Fully local. $0/query. Apache-2.0.
 
 ---
 
-### Tweet 3: DD214
+### Tweet 2: Knowledge Graph
 
-Your DD214 doesn't belong to OpenAI.
+OB2 now extracts a Knowledge Graph from every document you ingest.
 
-OB2 reads scanned PDFs. OCR built in. Runs on your laptop. Nothing leaves your network.
+Entity/relationship graph → graph-augmented retrieval reranking → better answers.
 
-Veterans have decades of paperwork to query. This is the use case that made us build proper OCR support.
-
----
-
-### Tweet 4: Multi-user
-
-Multi-user RAG finally done right:
-
-- Per-domain ACL (read/write/admin per user per domain)
-- argon2id passwords + HMAC session cookies
-- 128-bit API keys for machine clients
-- Brain key retires automatically when real admins exist
-- Email invite + password reset flows
-
-Same rules whether you auth via browser session or API key.
+Full Cytoscape.js visualization in the dashboard. GEXF export for Gephi. Backfill with resume support.
 
 ---
 
-### Tweet 5: Open WebUI
+### Tweet 3: GGUF from dashboard
 
-OB2 now ships with an optional Open WebUI chat surface:
+You shouldn't need a terminal to pull a GGUF from HuggingFace.
 
-```
-scripts/docker-start.sh --with-chat
-```
+OB2 TurboQuant's dashboard: type repo + filename, watch progress in GB/s, click Load. Model card shows port and load time.
 
-SSO from the OB2 dashboard. Per-user domain ACL applies inside chat. Responses include clickable source links.
-
-Chat queries search every domain you can read — one pgvector scan, ranked together.
+No CLI. No docker exec. No config edits.
 
 ---
 
-### Tweet 6: Rust sidecar
+### Tweet 4: Five LLM providers
 
-OB2's retrieval runs in Python (default) or Rust (opt-in, `OB2_SIDECAR_RUNTIME=rust`).
+OB2 now supports 5 LLM providers, hot-swappable from the Config tab:
 
-Same JSON-RPC. Same storage. No data migration. On RTX 5090:
+- llamacpp (TurboQuant GGUF) ← recommended local
+- Ollama
+- OpenAI
+- Anthropic
+- Gemini
 
-- 4x concurrent throughput (1,124 vs 281 caps/sec)
-- 13x faster cold start (0.36s vs 4.63s)
-- 2x less RAM (687MB vs 1,396MB)
+Same RAG pipeline regardless of provider. Chat and classification can use different ones.
 
-Golden-fixture parity suite locks both runtimes byte-identical on every PR.
+---
+
+### Tweet 5: Retrieval timing
+
+Retrieval in OB2 TurboQuant on a warm system: 8–14 ms.
+
+Includes: embedding the query, pgvector HNSW cosine search, TF-IDF hybrid rerank, graph rerank.
+
+Total request latency is dominated by LLM prefill, not retrieval.
+
+---
+
+### Tweet 6: Qwen3 on local hardware
+
+Qwen3.6-35B-A3B-Q4_K_M: 20 GB GGUF, 35B parameters, 3B active (MoE).
+
+On RTX 5090 with OB2 TurboQuant:
+- Full model on GPU
+- turbo3 KV cache compression
+- 8192 token context
+- --cache-prompt for fast follow-ups
+
+This is what local AI looks like in 2026.
 
 ---
 
 ## Mastodon
 
-### Post 1: Launch
+### Post 1: TurboQuant launch
 
-OB2: self-hosted RAG platform for anyone who needs grounded answers from their own documents.
+OB2 TurboQuant: self-hosted RAG with Google DeepMind's KV-cache compression.
 
-New features: multi-format ingestion (PDFs with OCR, audio with Whisper, Office, URLs, ZIP archives), clickable citation links (links to original files, 24-hour signed tokens, work without a login), multi-user + per-domain ACL, Open WebUI chat surface with SSO.
+New in this release:
+- TurboQuant KV cache (turbo3 default): ~3 bits per value, fits 35B MoE model in 20 GB VRAM
+- --cache-prompt: KV cache reuse across conversation turns
+- GGUF model management from the dashboard: pull from HuggingFace, load/unload, set defaults
+- Knowledge Graph: entity extraction + graph-augmented retrieval
+- 5 LLM providers: llamacpp, Ollama, OpenAI, Anthropic, Gemini
 
-Everything on your hardware. Your documents don't leave your server.
+Everything on your hardware. Apache-2.0. Docker. Five minutes.
 
-Apache-2.0. Docker. Five minutes.
+### Post 2: Knowledge Graph
 
-`scripts/docker-start.sh --with-chat`
+For anyone doing serious document work:
 
-### Post 2: Privacy angle
+OB2's Knowledge Graph extracts entities and relationships from every document chunk. Graph-augmented retrieval boosts answers near entity connections. Full visualization in the dashboard.
 
-For anyone working with sensitive documents:
-
-The premise of cloud RAG is "upload your files and we'll answer questions about them." That's fine for generic documents. For medical records, legal files, classified procedures, government forms — you want a different answer.
-
-OB2 runs on your hardware. No API calls for embeddings. No API calls for answers. Ollama runs locally. pgvector runs in Docker. Your documents index on your GPU.
-
-Apache-2.0. Fork it. Self-host it. Own it.
+This is what makes "ask your documents" actually useful at scale — not just keyword matching, but understanding what entities connect across your knowledge base.
 
 ---
 
 ## Hacker News
 
 ### Title options
-- "OB2: Self-hosted RAG with OCR, audio transcription, multi-user ACL, and clickable citations"
-- "Show HN: OB2 — fully local RAG that reads scanned PDFs, audio files, and cites sources with clickable links"
-- "Your DD214 doesn't belong to OpenAI: self-hosted RAG for sensitive documents"
+- "OB2 TurboQuant: self-hosted RAG with Google DeepMind KV-cache compression, Knowledge Graph, GGUF management"
+- "Show HN: OB2 TurboQuant — local RAG with 3-bit KV compression, entity graph, and full GGUF model management"
+- "TurboQuant: 35B LLM in 20 GB VRAM, built into a self-hosted RAG platform"
 
 ### Comment-length summary
 
-OB2 is a self-hosted RAG platform. You upload documents (PDFs including scanned ones, audio, Word/Excel, URLs, etc.), ask questions, and get answers that cite their sources with clickable links to the original files.
+OB2 TurboQuant is a self-hosted RAG platform with Google DeepMind's TurboQuant KV-cache compression baked in.
 
-What's new in the last few days: full multi-format ingestion via MarkItDown + ocrmypdf, original file storage with 24-hour HMAC-signed download URLs embedded in chat responses, multi-user with per-domain ACL, Open WebUI chat surface with SSO, multi-domain retrieval (prefix-less queries search all your domains in one pgvector scan).
+What's new since the last release:
+- **TurboQuant** (turbo3 by default): 3-bit KV cache compression, fits 35B MoE GGUF in 20 GB VRAM
+- **--cache-prompt**: conversation KV cache reuse — follow-up turns process only new tokens
+- **GGUF model management**: pull from HuggingFace or URL from the dashboard UI, load/unload with one click, set defaults from a dropdown
+- **Knowledge Graph**: async entity/relationship extraction from every ingested chunk, graph-augmented retrieval reranking, Cytoscape.js visualization, GEXF export, backfill with resume support
+- **5 LLM providers**: llamacpp (TurboQuant), Ollama, OpenAI, Anthropic, Gemini — hot-swappable from the Config tab
+- **Retrieval timing**: 8–14 ms on a warm system (pgvector HNSW + graph rerank)
+- **RAG token budget fix**: gateway was hardcoding 6000 tokens regardless of config, now uses runtime config value (default 2048)
 
-For anyone working with documents they can't send to OpenAI: military service records, legal files, medical records, classified procedures. Everything runs locally — Ollama for generation, sentence-transformers for embeddings, pgvector for search.
+The core remains the same: ingest any format (PDF with OCR, audio with Whisper, Office, URLs, ZIP), ask questions, get answers with clickable citations to original files, multi-user per-domain ACL.
 
-Apache-2.0. Five minutes to start with Docker. 19-step E2E test suite. Full docs in the repo.
-
-`scripts/docker-start.sh --with-chat`
+Apache-2.0. Fully local. Runs in Docker.
