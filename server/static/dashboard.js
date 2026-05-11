@@ -2363,13 +2363,14 @@ async function loadMailConfig() {
   try {
     const r = await fetch(`${BASE}/admin/config/mail`, { credentials: 'include' });
     if (!r.ok) return;
-    const { mail, env_locked } = await r.json();
+    const { mail, env_locked, env_keys } = await r.json();
+    const envName = (field) => (env_keys && env_keys[field]) || `OB2_${field.toUpperCase()}`;
     const set = (id, value, lockedField) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.value = value ?? '';
       el.disabled = !!env_locked[lockedField];
-      el.title = env_locked[lockedField] ? `Pinned by env var (OB2_${lockedField.toUpperCase()}) — edit there or unset to enable this field.` : '';
+      el.title = env_locked[lockedField] ? `Pinned by env var (${envName(lockedField)}) — edit there or unset to enable this field.` : '';
     };
     set('mail-driver', mail.driver, 'driver');
     set('mail-host', mail.host, 'host');
@@ -2378,10 +2379,11 @@ async function loadMailConfig() {
     // Password field: if env-locked, show placeholder text and disable.
     const passEl = document.getElementById('mail-pass');
     if (passEl) {
+      const passEnv = envName('pass');
       passEl.value = '';
-      passEl.placeholder = env_locked.pass ? 'Pinned by OB2_SMTP_PASS env var' : (mail.pass ? 'Leave blank to keep current' : 'Not set');
+      passEl.placeholder = env_locked.pass ? `Pinned by ${passEnv} env var` : (mail.pass ? 'Leave blank to keep current' : 'Not set');
       passEl.disabled = !!env_locked.pass;
-      passEl.title = env_locked.pass ? 'Pinned by env var (OB2_SMTP_PASS) — edit there or unset to enable this field.' : '';
+      passEl.title = env_locked.pass ? `Pinned by env var (${passEnv}) — edit there or unset to enable this field.` : '';
     }
     set('mail-secure', mail.secure, 'secure');
     set('mail-from', mail.from, 'from');

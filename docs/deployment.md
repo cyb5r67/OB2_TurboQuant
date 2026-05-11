@@ -170,15 +170,21 @@ Set in `.env` (or export before running scripts). Docker Compose reads the `.env
 
 ### SMTP / Email (runtime-tunable)
 
+Every field below is also editable live from the dashboard's **Config → Email (SMTP)** card; values write to `/data/config.yaml` and hot-reload on the next outbound send. Setting any of these env vars **pins** the corresponding field and disables it in the dashboard.
+
 | Variable | Default | Description |
 |---|---|---|
 | `OB2_SMTP_DRIVER` | *(empty = disabled)* | `smtp` to enable, `log` to log-only |
 | `OB2_SMTP_HOST` | *(empty)* | SMTP server hostname |
 | `OB2_SMTP_PORT` | *(empty)* | SMTP port (typically 587 for STARTTLS, 465 for TLS) |
 | `OB2_SMTP_USER` | *(empty)* | SMTP username |
-| `OB2_SMTP_PASS` | *(empty)* | SMTP password |
+| `OB2_SMTP_PASS` | *(empty)* | SMTP password (stored plaintext on disk in `/data/config.yaml`) |
 | `OB2_SMTP_SECURE` | *(empty)* | `starttls`, `tls`, or `none` |
 | `OB2_SMTP_FROM` | *(empty)* | From address (e.g., `OB2 <noreply@example.com>`) |
+| `OB2_PUBLIC_URL` | *(empty)* | Externally-reachable base URL used to build invite + reset links. **Only** required for those flows — the `POST /admin/smtp/test` button works without it. |
+
+**Minimum to send mail:** `host` + `from` + (auth credentials, when the server requires them).
+**Additional minimum to send invite / password-reset:** `public_url` (set to the URL your users will load OB2 from, e.g. `http://localhost:7600` or `https://ob2.example.com`).
 
 ### Open WebUI
 

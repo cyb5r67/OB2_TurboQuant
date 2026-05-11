@@ -12,15 +12,19 @@ import { getRuntime } from "../runtime_config.ts";
 import type { Mailer } from "./mailer.ts";
 
 export class SmtpMailer implements Mailer {
+  // "Can the SMTP transport actually send a message?" — host + from are the
+  // bare minimum. public_url is NOT checked here because it's only needed for
+  // building invite/reset URLs, not for raw transport. Callers that need a
+  // URL (forgot-password, /admin/users/:u/invite) check public_url separately.
   isConfigured(): boolean {
     const m = getRuntime().mail;
-    return !!(m.host && m.from && m.public_url);
+    return !!(m.host && m.from);
   }
 
   async send(msg: { to: string; subject: string; text: string; html: string }): Promise<void> {
     const m = getRuntime().mail;
     if (!this.isConfigured()) {
-      throw new Error("SmtpMailer: missing host, from, or public_url");
+      throw new Error("SmtpMailer: missing host or from");
     }
 
     const hasAuth = !!(m.user && m.pass);

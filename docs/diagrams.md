@@ -203,3 +203,81 @@ flowchart TD
 
     table --> pull & loadbtn & unload & restart
 ```
+
+---
+
+## 8. Email / SMTP Subsystem
+
+Three callers, one interface, two drivers, one external SMTP server. Driver selection and credentials are read fresh from `runtime_config` on every send — edits to the dashboard's **Config → Email** card hot-reload without a restart.
+
+```mermaid
+flowchart LR
+    subgraph callers["Callers in server/routes"]
+        invite["POST /admin/users/:u/invite<br/>renderInviteEmail()"]
+        forgot["POST /auth/forgot-password<br/>renderResetEmail()"]
+        test["POST /admin/smtp/test<br/>renderSmtpTestEmail()"]
+    end
+
+    subgraph mailer["server/mail"]
+        iface["Mailer interface<br/>send() · isConfigured()"]
+        log["LogMailer<br/>writes /data/mail-log.txt<br/>(refuses on public https)"]
+        smtp["SmtpMailer<br/>opens socket per send<br/>via denomailer 1.6.0"]
+        dispatch{{"getMailer()<br/>reads mail.driver"}}
+        iface --- dispatch
+        dispatch -->|driver=&quot;log&quot;| log
+        dispatch -->|driver=&quot;smtp&quot;| smtp
+    end
+
+    cfg[("Runtime config<br/>/data/config.yaml<br/>+ OB2_SMTP_* env overrides<br/>(env wins)")]
+
+    smtpserver["External SMTP server<br/>(Gmail · Titan · SES · …)"]
+
+    callers --> iface
+    cfg -.read on every send.-> smtp
+    cfg -.read on every send.-> log
+    smtp -->|TLS:465 / STARTTLS:587| smtpserver
+```
+
+**Configuration requirements per caller:**
+
+```mermaid
+flowchart TD
+    test["POST /admin/smtp/test"]:::test
+    invite["Invite / Reset flows"]:::link
+
+    host["mail.host"]
+    from["mail.from"]
+    auth["mail.user + mail.pass<br/>(only if server requires)"]
+    pub["mail.public_url<br/>(builds the clickable link)"]
+
+    host --> test
+    from --> test
+    auth -.optional.-> test
+
+    host --> invite
+    from --> invite
+    auth -.optional.-> invite
+    pub --> invite
+
+    classDef test fill:#dfd,stroke:#2a2
+    classDef link fill:#ffd,stroke:#aa0
+```
+
+The test endpoint deliberately does **not** require `public_url` — it only opens a socket and sends one message, no URL building. Older versions checked `public_url` inside `SmtpMailer.isConfigured()` and rejected the test with a misleading `"mailer not configured"`; that check now lives only at the invite/reset call sites where it actually matters.
+
+**`POST /admin/config/mail` write path** (merge, not clobber):
+
+```mermaid
+flowchart LR
+    body["JSON body<br/>{driver, host, port, user,<br/>pass, secure, from, public_url}"]
+    merge["Merge with current<br/>getRuntime().mail<br/>(empty/•••• pass → keep)"]
+    validate["validateRuntime({mail: nextMail})"]
+    overlay["...getFileConfig(),<br/>mail: nextMail"]
+    write["writeRuntime() →<br/>yaml.dump /data/config.yaml"]
+    reload["mtime watcher reloads<br/>on next getRuntime()"]
+
+    body --> merge --> validate --> overlay --> write --> reload
+```
+
+The `getFileConfig()` overlay preserves every other section (`llm`, `llamacpp`, `openai`, `anthropic`, `gemini`, `graph`, `context`, …) that already lives in `/data/config.yaml`, so saving mail credentials never touches LLM provider settings or anything else.
+

@@ -51,7 +51,7 @@ import { revokeUserSessions } from "../auth/sessions.ts";
 import { getMailer } from "../mail/mailer.ts";
 import { renderInviteEmail, renderSmtpTestEmail } from "../mail/templates.ts";
 import { generateToken, revokeUserTokens } from "../auth/reset-tokens.ts";
-import { getRuntime, validateRuntime, writeRuntime, type MailConfig } from "../runtime_config.ts";
+import { getRuntime, getFileConfig, validateRuntime, writeRuntime, type MailConfig } from "../runtime_config.ts";
 import { safeError } from "./_errors.ts";
 import { dispatch, loadIngestEnv } from "../import/runner.ts";
 import { getJob } from "../import/jobs.ts";
@@ -909,6 +909,10 @@ export function adminRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
         public_url: m.public_url,
       },
       env_locked: envLocked,
+      // Field-name → real env var name, so the dashboard can display the
+      // correct OB2_SMTP_* / OB2_PUBLIC_URL name in tooltips instead of
+      // synthesizing a wrong one client-side.
+      env_keys: envKeys,
     });
   });
 
@@ -956,17 +960,13 @@ export function adminRoutes(config: Config, sidecar: Sidecar): Hono<AppEnv> {
     }
 
     try {
-      // Re-fetch the file-level config (without env overrides) and overlay.
-      // We use the runtime module's writeRuntime which accepts a full partial.
-      // The existing module lacks a getFileConfig + overlay helper, so we
-      // construct the next partial from the merged runtime minus env keys.
-      // Since env vars ALWAYS win on the next merge, persisting them here is
-      // harmless — they'll be re-applied by _applyEnvOverrides on reload.
+      // Overlay the new mail section onto the existing file-level config so
+      // other sections (llm, llamacpp, openai, anthropic, gemini, graph,
+      // context, etc.) are preserved untouched. getFileConfig() returns the
+      // raw on-disk YAML — NOT the merged runtime (which would bake in env
+      // overrides and defaults that aren't actually in the file).
       const fullNext = {
-        ollama: getRuntime().ollama,
-        embedder: getRuntime().embedder,
-        sync: getRuntime().sync,
-        retrieval: getRuntime().retrieval,
+        ...getFileConfig(),
         mail: nextMail,
       };
       writeRuntime(fullNext);

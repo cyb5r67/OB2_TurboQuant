@@ -868,9 +868,23 @@ Tests connectivity to Ollama. Returns `{ok, latency_ms, models: [...], error?}`.
 
 Tests connectivity to pgvector. Returns `{ok, latency_ms, schema_version, error?}`.
 
-#### `POST /admin/test-smtp`
+#### `GET /admin/smtp-status`
 
-Sends a test email to the specified address. Returns `{ok, error?}`.
+Returns `{configured: boolean}`. `true` when the mailer can send AND `mail.public_url` is set (i.e., end-to-end ready for invite/reset email flows). The dashboard's Email card uses this to render the green/amber dot.
+
+#### `GET /admin/config/mail`
+
+Returns the current mail config with the password masked. Includes `env_locked` (per-field flag indicating env-var pinning) and `env_keys` (per-field → real env var name, so UI tooltips can name the correct `OB2_SMTP_*` / `OB2_PUBLIC_URL` variable).
+
+#### `POST /admin/config/mail`
+
+Body: any subset of `MailConfig` (`driver`, `host`, `port`, `user`, `pass`, `secure`, `from`, `public_url`). Validated, then overlaid onto the existing `/data/config.yaml` — other config sections (`llm`, `llamacpp`, `openai`, `anthropic`, `gemini`, `graph`, `context`, etc.) are preserved untouched. An empty or `••••` `pass` field is treated as "keep the existing password". Hot-reloads on the next outbound send; no restart needed.
+
+#### `POST /admin/smtp/test`
+
+Body: `{to: "you@example.com"}`. Sends a one-shot diagnostic email. Returns `{ok}` on success or `{error}` on failure (with the SMTP server's error text, e.g. `"SMTP send failed: 535: 5.7.8 ..."` for auth rejection).
+
+Requires `mail.host` + `mail.from` (+ valid SMTP credentials if the server demands auth). **Does NOT require `mail.public_url`** — that field is only used to build invite/reset URLs, which the test send doesn't do.
 
 ---
 
