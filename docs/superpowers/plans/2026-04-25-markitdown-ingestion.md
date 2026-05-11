@@ -44,7 +44,7 @@
 - **Bash lint after every e2e.sh change:** `bash -n /mnt/c/projects/OB2/tests/e2e.sh`. Expected: silent.
 - **Deploy pattern:** `docker cp <file> ob2-server:<container path>` then `docker compose -f docker/docker-compose.yml --env-file .env restart ob2-server`. Wait until `curl -sf http://127.0.0.1:7600/health` returns 200.
 - **Service token for smoke:** `SVC_TOKEN=$(grep '^OB2_OPENWEBUI_SERVICE_TOKEN=' .env | cut -d= -f2)`.
-- **Admin key for smoke:** `ADMIN_KEY="ob2_0be9cd14b1194ad6ee3adedfb4007edf"`.
+- **Admin key for smoke:** `ADMIN_KEY="ob2_<redacted>"`.
 - **Test user `import-tester` with `write` on `@import-test`:** create at the start of e2e Step 19, use throughout.
 
 ---
@@ -1298,7 +1298,7 @@ until curl -sf -m 2 http://127.0.0.1:7600/health > /dev/null 2>&1; do sleep 1; d
 - [ ] **Step 5: Smoke test sync upload**
 
 ```bash
-ADMIN_KEY="ob2_0be9cd14b1194ad6ee3adedfb4007edf"
+ADMIN_KEY="ob2_<redacted>"
 echo "# Hello smoke" > /tmp/smoke.md
 curl -s -X POST -H "Authorization: Bearer $ADMIN_KEY" \
   -F "file=@/tmp/smoke.md" -F "source_label=smoke-test.md" \
@@ -1429,7 +1429,7 @@ until curl -sf -m 2 http://127.0.0.1:7600/health > /dev/null 2>&1; do sleep 1; d
 
 # Drop a known file in /data/, then call MCP tools/list to verify capture_file is advertised:
 docker exec ob2-server bash -c 'echo "# MCP smoke" > /data/mcp-smoke.md'
-ADMIN_KEY="ob2_0be9cd14b1194ad6ee3adedfb4007edf"
+ADMIN_KEY="ob2_<redacted>"
 curl -s -H "x-brain-key: $ADMIN_KEY" -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -X POST http://127.0.0.1:7600/mcp \
@@ -2019,7 +2019,7 @@ until curl -sf -m 2 http://127.0.0.1:7600/health > /dev/null 2>&1; do sleep 1; d
 - [ ] **Step 3: End-to-end smoke after fresh recreate**
 
 ```bash
-ADMIN_KEY="ob2_0be9cd14b1194ad6ee3adedfb4007edf"
+ADMIN_KEY="ob2_<redacted>"
 
 echo "=== upload tiny.md ==="
 curl -s -X POST -H "Authorization: Bearer $ADMIN_KEY" \

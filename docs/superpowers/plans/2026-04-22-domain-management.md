@@ -246,7 +246,7 @@ def method_knowledge_stats(params: dict) -> dict:
 
 ```bash
 curl -s -X POST http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" \
+  -H "Authorization: Bearer ob2_<redacted>" \
   -H "Content-Type: application/json" | python3 -m json.tool
 ```
 
@@ -327,7 +327,7 @@ Expected: `ob2-server` status shows `(healthy)`.
 
 ```bash
 curl -s -X POST http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" \
+  -H "Authorization: Bearer ob2_<redacted>" \
   -H "Content-Type: application/json" \
   -d '{"domain":"newdomain","description":"Created via API test"}' | python3 -m json.tool
 ```
@@ -344,7 +344,7 @@ Expected:
 
 ```bash
 curl -s -X POST http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" \
+  -H "Authorization: Bearer ob2_<redacted>" \
   -H "Content-Type: application/json" \
   -d '{"domain":"test"}' | python3 -m json.tool
 ```
@@ -355,7 +355,7 @@ Expected: `{"error": "domain @test already exists"}` with HTTP 409.
 
 ```bash
 curl -s -X POST http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" \
+  -H "Authorization: Bearer ob2_<redacted>" \
   -H "Content-Type: application/json" \
   -d '{"domain":"My Domain!"}' | python3 -m json.tool
 ```
@@ -412,7 +412,7 @@ sleep 20 && docker compose -f docker/docker-compose.yml ps
 
 ```bash
 curl -s "http://localhost:7600/admin/domains/test/docs" \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" | python3 -m json.tool
+  -H "Authorization: Bearer ob2_<redacted>" | python3 -m json.tool
 ```
 
 Expected: `{"docs":[{"doc_id":"...","text":"...","metadata":{...}},...], "total": N}` — seed docs (`_ob2_system: true`) must NOT appear in the list.
@@ -469,7 +469,7 @@ sleep 20 && docker compose -f docker/docker-compose.yml ps
 
 ```bash
 curl -s -X PATCH http://localhost:7600/admin/domains/test \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" \
+  -H "Authorization: Bearer ob2_<redacted>" \
   -H "Content-Type: application/json" \
   -d '{"description":"OB2 platform test domain"}' | python3 -m json.tool
 ```
@@ -480,7 +480,7 @@ Expected: `{"ok": true}`
 
 ```bash
 curl -s http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" | python3 -m json.tool
+  -H "Authorization: Bearer ob2_<redacted>" | python3 -m json.tool
 ```
 
 Expected: `"domains":[...]` where the `test` entry has `"description":"OB2 platform test domain"`.
@@ -1064,17 +1064,17 @@ git commit -m "feat(dashboard): Manage modal — Aliases, Users, Settings tabs"
 
 ```bash
 curl -s -X DELETE http://localhost:7600/admin/domains/plan-test \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" | python3 -m json.tool
+  -H "Authorization: Bearer ob2_<redacted>" | python3 -m json.tool
 
 curl -s -X DELETE http://localhost:7600/admin/domains/newdomain \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" | python3 -m json.tool
+  -H "Authorization: Bearer ob2_<redacted>" | python3 -m json.tool
 ```
 
 - [ ] **Step 2: Confirm original 5 domains are intact**
 
 ```bash
 curl -s http://localhost:7600/admin/domains \
-  -H "Authorization: Bearer ob2_0be9cd14b1194ad6ee3adedfb4007edf" | python3 -m json.tool
+  -H "Authorization: Bearer ob2_<redacted>" | python3 -m json.tool
 ```
 
 Expected: `dash-test`, `docker-test`, `netsec`, `test`, `testdom` present with correct doc counts.
