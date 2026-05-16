@@ -32,6 +32,13 @@ function checkPerm(domain: string, required: "read" | "write" | "admin"): string
   return null;
 }
 
+function checkGlobalAdmin(): string | null {
+  const auth = getAuth();
+  if (!auth) return null; // single-key mode — allow
+  if (!auth.global_admin) return `Permission denied: ${auth.username} is not a global admin`;
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Sidecar result shapes (mirrors retrieval/sidecar.py)
 // ─────────────────────────────────────────────────────────────
@@ -405,6 +412,142 @@ function buildMcpServer(config: Config, sidecar: Sidecar): McpServer {
             type: "text" as const,
             text: `chat_knowledge error: ${(err as Error).message}`,
           }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── Tool 5: create_domain ──
+  server.registerTool(
+    "create_domain",
+    {
+      title: "Create Domain",
+      description:
+        "Create a new knowledge domain. Use this when the user wants to store knowledge in a topic area that doesn't exist yet. " +
+        "Domain names must be lowercase letters, numbers, and hyphens only (max 64 chars). Requires global admin privileges.",
+      inputSchema: {
+        domain: z.string().describe("Domain name (lowercase letters, numbers, hyphens only, e.g. 'netsec', 'company-policy')."),
+        description: z.string().optional().describe("Optional human-readable description of this domain's purpose."),
+      },
+    },
+    async ({ domain, description }) => {
+      const denied = checkGlobalAdmin();
+      if (denied) return { content: [{ type: "text" as const, text: denied }], isError: true };
+      try {
+        await sidecar.call<{ ok: boolean; domain: string }>("create_domain", {
+          domain,
+          description: description ?? "",
+        });
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Domain @${domain} created.${description ? ` Description: "${description}"` : ""}`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `create_domain error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── Tool 6: delete_doc ──
+  server.registerTool(
+    "delete_doc",
+    {
+      title: "Delete Document",
+      description:
+        "Permanently delete a single document from a domain. This is irreversible. " +
+        "You MUST ask the user for explicit confirmation before calling with confirmed=true. " +
+        "When confirmed is omitted or false, this tool describes what would be deleted without doing anything.",
+      inputSchema: {
+        domain: z.string().describe("Domain containing the document."),
+        doc_id: z.string().describe("Document ID to delete (from search_knowledge results)."),
+        confirmed: z.boolean().optional().describe(
+          "Set true only after the user has explicitly confirmed the deletion. Omit to preview without deleting.",
+        ),
+      },
+    },
+    async ({ domain, doc_id, confirmed }) => {
+      const denied = checkPerm(domain, "admin");
+      if (denied) return { content: [{ type: "text" as const, text: denied }], isError: true };
+      if (!confirmed) {
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `Confirmation required: permanently delete doc "${doc_id}" from @${domain}. ` +
+              `This cannot be undone. Ask the user to confirm, then call delete_doc again with confirmed=true.`,
+          }],
+        };
+      }
+      try {
+        const r = await sidecar.call<{ deleted: boolean }>("delete", { domain, doc_id });
+        return {
+          content: [{
+            type: "text" as const,
+            text: r.deleted
+              ? `Deleted doc "${doc_id}" from @${domain}.`
+              : `Doc "${doc_id}" not found in @${domain}.`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `delete_doc error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ── Tool 7: delete_domain ──
+  server.registerTool(
+    "delete_domain",
+    {
+      title: "Delete Domain",
+      description:
+        "Permanently delete an entire domain and ALL its documents. This is irreversible. " +
+        "You MUST ask the user for explicit confirmation before calling with confirmed=true. " +
+        "When confirmed is omitted or false, this tool describes what would be deleted without doing anything.",
+      inputSchema: {
+        domain: z.string().describe("Domain to delete entirely."),
+        confirmed: z.boolean().optional().describe(
+          "Set true only after the user has explicitly confirmed the deletion. Omit to preview without deleting.",
+        ),
+      },
+    },
+    async ({ domain, confirmed }) => {
+      const denied = checkGlobalAdmin();
+      if (denied) return { content: [{ type: "text" as const, text: denied }], isError: true };
+      if (!confirmed) {
+        let docCount = "an unknown number of";
+        try {
+          const stats = await sidecar.call<StatsResult>("knowledge_stats", { domain });
+          if (stats.doc_count !== undefined) docCount = String(stats.doc_count);
+        } catch { /* ignore — warning still shown */ }
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `Confirmation required: permanently delete domain @${domain} and all ${docCount} document(s) it contains. ` +
+              `This cannot be undone. Ask the user to confirm, then call delete_domain again with confirmed=true.`,
+          }],
+        };
+      }
+      try {
+        const r = await sidecar.call<{ deleted_count: number }>("delete_domain", { domain });
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Domain @${domain} deleted. ${r.deleted_count} document(s) removed.`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `delete_domain error: ${(err as Error).message}` }],
           isError: true,
         };
       }
