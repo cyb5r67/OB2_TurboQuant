@@ -93,7 +93,8 @@ OB2 TurboQuant is an open-source, self-hosted RAG platform with Google DeepMind'
 - Email invite flow, password reset, zero-admin safety rail
 
 **Works with existing AI tools**
-- MCP tools for Claude Code / Cursor
+- MCP tools for Claude Code / Cursor: capture, search, chat, file ingest, and full domain lifecycle management
+- Global-admin agents can create domains on the fly; destructive tools (`delete_doc`, `delete_domain`) require explicit user confirmation before executing
 - OpenAI-compatible API for any client
 
 ---
@@ -249,6 +250,7 @@ docker compose -f docker/docker-compose.yml --env-file .env \
 ## Slide 12: What's Available Now vs Roadmap
 
 **Shipped and available now:**
+- Agent-driven domain management via MCP (`create_domain`, `delete_doc`, `delete_domain` with confirmation gate)
 - TurboQuant KV-cache compression (turbo3 by default)
 - llamacpp provider: pull any GGUF from HuggingFace in the dashboard
 - Knowledge Graph: entity/relationship extraction + graph-augmented retrieval

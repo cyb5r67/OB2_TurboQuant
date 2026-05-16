@@ -87,7 +87,27 @@ Same retrieval pipeline regardless of which LLM is active.
 
 ---
 
-### Post 5: OB2 vs cloud RAG (updated)
+### Post 5: Agent domain management
+
+**Claude Code can now create and manage OB2 knowledge domains without touching the dashboard.**
+
+New in OB2 TurboQuant: three MCP tools that give AI agents full domain lifecycle control:
+
+🟢 `create_domain` — agent creates a new knowledge area on the fly, no human intervention needed
+
+🔴 `delete_doc` — remove a specific document, with a mandatory confirmation step before anything is deleted
+
+🔴 `delete_domain` — remove an entire domain and all its contents, with a mandatory confirmation step (shows the doc count so you know exactly what's at risk)
+
+The confirmation gate is enforced at the tool boundary, not by convention. When an agent calls a destructive tool without `confirmed: true`, it gets a plain-English description of what would be deleted and must ask the user before proceeding.
+
+Set up a dedicated global-admin user for your agent, configure `x-brain-key` in your MCP client, and your Claude Code sessions can self-organize knowledge as they go.
+
+#AI #ClaudeCode #MCP #RAG #LocalAI #OpenSource
+
+---
+
+### Post 6: OB2 vs cloud RAG (updated)
 
 **OB2 TurboQuant vs cloud RAG — what you're actually choosing between:**
 
@@ -154,7 +174,17 @@ Same RAG pipeline regardless of provider. Chat and classification can use differ
 
 ---
 
-### Tweet 5: Retrieval timing
+### Tweet 5: Agent domain management
+
+OB2 now lets Claude Code create and delete knowledge domains via MCP.
+
+`create_domain` → instant. `delete_doc` / `delete_domain` → confirmation gate: the tool tells Claude what would be deleted and requires confirmed=true. User approves before anything is destroyed.
+
+Global-admin agent key + x-brain-key header. That's it.
+
+---
+
+### Tweet 6: Retrieval timing
 
 Retrieval in OB2 TurboQuant on a warm system: 8–14 ms.
 

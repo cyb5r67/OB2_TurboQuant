@@ -90,6 +90,8 @@ The team captures ad-hoc knowledge too:
 
 That fact is embedded, stored, and searchable within 100 ms.
 
+**Agent-managed domains:** With a global-admin MCP key, Claude Code can create new domains on the fly — for example, spinning up `@incident-2026-05` at the start of a major incident, capturing findings as they emerge, and querying them alongside the existing `@netsec` runbooks. When the incident is closed, `delete_domain` removes it with one confirmed call.
+
 ---
 
 ## 4. Legal Team: Case File Knowledge Base
@@ -187,7 +189,7 @@ Same data, same queries, same result quality — just faster. Toggle back with `
 |---|---|---|
 | **Veterans / government** | One domain per record type | OCR for scanned PDFs, original file download |
 | **Education** | Per-department domains | Multi-user ACL, department-scoped access |
-| **Security / SRE** | Per-function domains | MCP integration with Claude Code, fast capture |
+| **Security / SRE** | Per-function domains | MCP integration with Claude Code, fast capture, agent-managed incident domains |
 | **Legal** | Per-matter domains | Strict per-domain isolation, citation links |
 | **Research** | One or few large domains | Cross-document queries, PDF citation links |
 | **Enterprise IT** | Per-team domains | Bulk import CLI, high-throughput Rust sidecar |

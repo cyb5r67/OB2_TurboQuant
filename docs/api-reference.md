@@ -148,6 +148,80 @@ Full RAG in one call: retrieve → compress → Ollama → synthesized answer.
 
 **Permission required:** `read` on domain.
 
+### `create_domain`
+
+Create a new knowledge domain. Useful for agents that need to provision a topic area on the fly without a dashboard visit.
+
+**Input:**
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `domain` | string | yes | Domain name (lowercase letters, numbers, hyphens, max 64 chars) |
+| `description` | string | no | Human-readable description of the domain's purpose |
+
+**Response:** `"Domain @netsec created. Description: \"Network security procedures\""`
+
+**Permission required:** `global_admin`.
+
+---
+
+### `delete_doc`
+
+Permanently delete a single document from a domain. Irreversible.
+
+When `confirmed` is omitted or `false`, the tool returns a confirmation prompt describing what would be deleted — **no deletion occurs**. The caller must ask the user for explicit confirmation and then call again with `confirmed: true`.
+
+**Input:**
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `domain` | string | yes | Domain containing the document |
+| `doc_id` | string | yes | Document ID to delete (from `search_knowledge` results) |
+| `confirmed` | boolean | no | Must be `true` to actually delete. Omit to preview. |
+
+**Response (unconfirmed):** `"Confirmation required: permanently delete doc \"<id>\" from @<domain>. This cannot be undone. Ask the user to confirm, then call delete_doc again with confirmed=true."`
+
+**Response (confirmed, found):** `"Deleted doc \"<id>\" from @<domain>."`
+
+**Response (confirmed, not found):** `"Doc \"<id>\" not found in @<domain>."`
+
+**Permission required:** `admin` on domain.
+
+---
+
+### `delete_domain`
+
+Permanently delete an entire domain and all its documents. Irreversible.
+
+When `confirmed` is omitted or `false`, the tool fetches the current document count and returns a confirmation prompt — **no deletion occurs**. The caller must ask the user for explicit confirmation and then call again with `confirmed: true`.
+
+**Input:**
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `domain` | string | yes | Domain to delete entirely |
+| `confirmed` | boolean | no | Must be `true` to actually delete. Omit to preview. |
+
+**Response (unconfirmed):** `"Confirmation required: permanently delete domain @<domain> and all N document(s) it contains. This cannot be undone. Ask the user to confirm, then call delete_domain again with confirmed=true."`
+
+**Response (confirmed):** `"Domain @<domain> deleted. N document(s) removed."`
+
+**Permission required:** `global_admin`.
+
+#### Setting up an agent user
+
+To allow a Claude Code agent (or any MCP client) to use `create_domain` and `delete_domain`, create a dedicated global-admin user:
+
+```bash
+curl -X POST http://localhost:7600/admin/users \
+  -H "Authorization: Bearer <your-admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "claude", "global_admin": true, "domains": {}}'
+# Response includes the key — use it as x-brain-key in your MCP client config
+```
+
+---
+
 ### `capture_file`
 
 Convert a local file or URL to Markdown and capture all chunks into a domain.

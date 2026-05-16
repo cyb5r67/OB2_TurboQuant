@@ -28,6 +28,7 @@ OB2 is a fully self-hosted retrieval-augmented generation platform. Upload docum
 - **Domain management** — admin UI for creating/managing domains with descriptions, doc browsers, per-domain alias management, per-user domain assignment
 - **Async ingestion job queue** — large files, audio, and ZIPs queue async with disk persistence; dashboard polls with exponential backoff
 - **Email invite + password-reset flows** — single-use tokens, 7-day invite TTL, 1-hour reset TTL
+- **Agent-driven domain management via MCP** — three new MCP tools let a Claude Code agent (or any global-admin MCP client) create domains on the fly (`create_domain`), delete individual documents (`delete_doc`), and delete entire domains (`delete_domain`). Destructive tools require `confirmed: true` — without it they describe what would be deleted and prompt the user for explicit confirmation before proceeding.
 - **Security hardening** — magic-byte sniffing, SSRF denylist, `/data` path realpath check, ZIP-bomb size cap, header-injection strip on the Open WebUI proxy, signed file-download URLs, CSP/HSTS, per-IP rate limiting
 
 ## Quick Start
@@ -70,6 +71,7 @@ scripts/docker-start.sh --build
 ## Feature Overview
 
 - **Ingestion**: drag-drop upload in dashboard, paste URL, `capture_file` MCP tool, or CLI importers (`csv`, `docs`, `pdf`, `wiki`)
+- **MCP tools**: `capture_knowledge`, `capture_file`, `search_knowledge`, `knowledge_stats`, `chat_knowledge` (any user); `create_domain`, `delete_doc` (with confirmation gate), `delete_domain` (with confirmation gate) — global-admin agent required for domain lifecycle tools
 - **Retrieval**: hybrid TF-IDF + semantic search (configurable `OB2_HYBRID_ALPHA`), multi-domain in one scan, single-domain with `@domain` prefix
 - **Generation**: pluggable LLM provider — Ollama (default, `gemma3:4b`) or llama.cpp / turboquant_plus (`OB2_LLM_PROVIDER=llamacpp`); grounded context injection, streaming SSE; cross-provider classifier supported
 - **Storage**: two-tier default (SQLite write cache → pgvector HNSW), or standalone `sqlite` / `pgvector`

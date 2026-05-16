@@ -127,6 +127,22 @@ The same ACL applies whether you authenticate via the dashboard, an API key, or 
 
 ---
 
+## Agent-driven domain management
+
+OB2's MCP integration now extends beyond retrieval and capture. A Claude Code agent (or any MCP client) with global-admin credentials can manage the full domain lifecycle without a dashboard visit:
+
+- **`create_domain`** — provision a new knowledge domain on the fly, with an optional description. Useful when an agent detects it needs a new topic area mid-session.
+- **`delete_doc`** — remove a specific document by `doc_id` (returned by `search_knowledge`).
+- **`delete_domain`** — remove an entire domain and all its contents.
+
+The practical flow: an agent creates a domain, populates it with `capture_knowledge` or `capture_file`, queries it with `search_knowledge` or `chat_knowledge`, and cleans up when done — all in one session, without a human touching the dashboard.
+
+For destructive operations, a built-in two-step confirmation gate enforces user approval. When `confirmed` is not `true`, both delete tools return a plain-English description of what would be deleted — including the current document count for domain deletion — and instruct the agent to call again with `confirmed: true`. This means Claude surfaces the question to the user before proceeding. The gate is enforced at the tool boundary, not by convention.
+
+To enable this, create a dedicated global-admin user for the agent and set its key as `x-brain-key` in the MCP client config. Regular users with only domain-level permissions cannot call `create_domain` or `delete_domain`.
+
+---
+
 ## Under the hood
 
 **Two-tier storage:** writes go to SQLite first (151 µs/insert). A background SyncWorker pushes everything to pgvector every five seconds for HNSW-indexed queries (2.3 ms). If pgvector is unreachable, sync backs off and retries; queries fall back to SQLite.

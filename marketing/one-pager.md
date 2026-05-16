@@ -25,6 +25,7 @@ LLMs give generic answers because they don't know your specific documents, proce
 | **Fully local** | Ollama or llamacpp on your hardware, embeddings on your GPU, pgvector in Docker. Zero cloud dependency. $0/query. |
 | **Cloud providers too** | Switch to OpenAI, Anthropic, or Gemini from the Config tab — same interface, same RAG pipeline, same citations. |
 | **Open WebUI chat surface** | Optional — one flag enables a full chat UI with SSO from the OB2 dashboard. |
+| **AI agent domain management** | Claude Code or any MCP agent with global-admin can create domains on the fly and clean them up with a built-in user-confirmation gate on destructive operations — no dashboard visit required. |
 | **Self-service admin** | Web dashboard: pull GGUF models from HuggingFace, load/unload models, manage users, hot-reload config. No CLI required. |
 | **Opt-in Rust sidecar** | 4x bulk-ingest throughput, 13x faster cold start, 2x less RAM vs the Python default — one env var to switch. |
 
